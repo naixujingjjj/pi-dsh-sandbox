@@ -11,7 +11,7 @@
 | 操作系统 | **Windows 10/11 x64**。其它平台在 confined 模式下会报 `SANDBOX_UNAVAILABLE`；只有你显式把模式切成 `off` 才会回到 Pi 内置执行路径 |
 | Node.js | **建议 Node 24 LTS**；最低 **22.19**（`engines` 与 Pi 的要求） |
 | Pi | `@earendil-works/pi-coding-agent` **>= 1.6** |
-| 运行器 | 本包固定的 `@deepseek-ai/dsh-sandbox-windows-acl@0.2.2-rc.5`。**不需要**全局安装 DSH |
+| 运行器 | 本包**内置**（vendored）打好补丁的 `@deepseek-ai/dsh-sandbox-windows-acl@0.2.2-rc.5+pi-dsh.1`，位于包内 `vendor/`。**不需要**全局安装 DSH |
 | 可选 bash | Git for Windows、MSYS2 或 Cygwin 的 `bash.exe`；WSL 的 `bash.exe` 会被拒绝 |
 | 网络 | 源码安装和 tgz 安装都需要从 npm 源取运行依赖 |
 | 权限 | 当前用户对工作区目录有正常读写权限；首次 `workspace-write` 授权需要能修改该目录的 DACL/SACL |
@@ -47,7 +47,7 @@ npm ci --include=optional
   npm ci --include=optional --omit=dev
   ```
 
-- **不要加 `--omit=peer`**，除非你确认本仓库的 `package.json` 已把 DSH 后端的运行依赖提升为直接 `dependencies`。当前锁定的后端把 `@deepseek-ai/dsh-subprocess` 等声明为 **peer**；`--omit=peer` 会让 npm 不把它们写到磁盘，运行器 `lib/runner.js` 会在 `import "@deepseek-ai/dsh-subprocess/control"` 处失败。
+- **不要加 `--omit=peer`**，除非你确认运行器 import 的包都已落盘。本包把 `@deepseek-ai/dsh-subprocess`、`dsh-win32-process`、`dsh-lazy-require`、`dsh-skill` 声明为直接 `dependencies`，但它们自身的 peer（如 `@deepseek-ai/cordis`）需要 npm 正常安装；`--omit=peer` 可能让它们缺失，运行器会在 import 时失败。
 - 本包声明给宿主 Pi 的 peer（`@earendil-works/pi-coding-agent`、`@earendil-works/pi-tui`、`typebox`）是**可选 peer**，由 Pi 在加载扩展时提供。不要为了它们安装第二份副本。
 - 安装依赖需要联网。若 npm 缓存/镜像缺包，见 [troubleshooting](troubleshooting.md)。
 
@@ -91,13 +91,14 @@ New-Item -ItemType Directory -Force -Path $extRoot | Out-Null
 ### 3.3 安装 tarball 及其依赖
 
 ```powershell
-$tgz = "C:\src\downloads\pi-dsh-sandbox-0.4.1.tgz"   # 换成你下载的文件
+$tgz = "C:\src\downloads\pi-dsh-sandbox-0.4.2.tgz"   # 换成你下载的文件
 npm install --prefix $extRoot --include=optional --omit=dev "$tgz"
 ```
 
 说明：
 
-- `.tgz` 只包含本包的源码/文档，**不包含** `node_modules`，也不是“离线全依赖包”。`npm install` 会联网安装固定的 DSH 后端、`koffi` 等依赖。
+- `.tgz` 只包含本包的源码/文档/内置后端，**不包含** `node_modules`，也不是“离线全依赖包”。`npm install` 会联网安装 `koffi`、`yaml` 与 DSH 运行依赖。
+- `.tgz` **包含** `vendor/dsh-sandbox-windows-acl/`（打好补丁的后端源码、编译产物、来源与哈希记录）；它是交付的一部分，不要用旧 tarball 或手工拷来的文件替代。
 - `--include=optional` 仍然必须带，否则 `koffi` 的平台二进制不会落盘。
 - 同样**不要加 `--omit=peer`**，原因见 2.2：当前后端把运行所需的 DSH 包声明为 peer。
 - npm 可能在该目录生成/更新 `package.json`、`package-lock.json`；保留它们，后续 `pi install` 不需要它们，但删除目录再重装时会用到锁文件。
@@ -118,11 +119,11 @@ pi install "$extRoot\node_modules\pi-dsh-sandbox"
 然后启动 Pi 或 `/reload`，用 `/sandbox status` 确认：
 
 - `mode` 是 `workspace-write`（默认）；
-- `runner:` 指向实际使用的 `@deepseek-ai/dsh-sandbox-windows-acl/lib/runner.js`。它可能在包目录的 `node_modules` 下，也可能被 npm 提升到 `<extRoot>\node_modules\@deepseek-ai\...`；以 `/sandbox status` 显示的路径为准；
-- `backend:` 显示 `0.2.2-rc.5`；
+- `runner:` 指向**包内**的 `vendor\dsh-sandbox-windows-acl\lib\runner.js`；
+- `backend:` 显示 `@deepseek-ai/dsh-sandbox-windows-acl 0.2.2-rc.5+pi-dsh.N（来源：vendor）`；
 - `enforcement: partial`。
 
-符合上述内容即说明本包自带的固定 DSH 依赖可用，**不需要全局 DSH**。
+符合上述内容即说明包内 vendored 后端可用，**不需要全局 DSH**。若 `runner:` 指向 `node_modules` 里的旧后端或某个全局 DSH，说明加载的不是本版本，先 `/reload`，再检查包目录是否完整。
 
 ### 3.5 不要把包目录解压出来直接加载
 

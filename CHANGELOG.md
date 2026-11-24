@@ -1,5 +1,18 @@
 # 更新记录
 
+## 0.4.2
+
+- 修复「工作区根无法授权导致沙盒初始化失败」（`SetNamedSecurityInfoW failed (Win32 5): grantWrite(<工作区根>)`）的诊断与处置：这属于插件在真实目录上初始化失败，不是命令越界。
+- **交付改为包内内置（vendored）的打补丁后端** `vendor/dsh-sandbox-windows-acl/`：以 npm 发布版 `0.2.2-rc.5` 的 `src/` 为基础，应用仓库内 `patches/` 后用 TypeScript 编译；带上游 `LICENSE`、`pin.json`（tarball SHA-256 与补丁哈希）和 `PROVENANCE.json`（每个产物哈希）。resolver 依次为显式配置 > 包内 `vendor/` > 插件 `node_modules` > 全局 DSH。交付不再依赖手工改 `node_modules`（`npm ci`/`npm pack`/重装都会覆盖它），也不以上游发布为前提。上游 `0.2.2-rc.5` 发布版**没有**该修复，本版不声称已发布上游。
+- 后端行为：工作区根已经通过**继承**处于 Low no-write-up 时，不再重复写完整性标签（写标签需要 `WRITE_OWNER`；子目录通常只有所有者隐含的 `WRITE_DAC`），只改 DACL 即可完成授权。**正常授权仍会写能力 SID 允许 ACE 与 Everyone 删除子项拒绝 ACE**：这是“不需要额外修复权限/不需要重写现有 Low 标签”，不是“完全不改 ACL”。
+- 加固继承标签的 native 解析：ACE 头必须落在 `AclSize` 内，内联 SID 的 `SubAuthorityCount`/长度必须与 `AceSize` 一致才做 `sameSidAt`，且必须遍历完整条 ACL 才接受——前面命中的标签不再掩盖后续损坏，畸形 ACL 不越界读、直接回退为写标签（fail-closed）。
+- 后端在**写标签**被 `ERROR_ACCESS_DENIED` 拒绝时，错误详情点名 `WRITE_OWNER`；只改 DACL 的路径保留普通详情。`readiness` 只在错误行含此后端标记时断言该成因，其它 Win32 5 一律列为可能原因（DACL 写权限、受保护描述符、owner/group/SACL、策略），并给出只读检查，不自动改 ACL。
+- `readiness` 修正：带括号的合法路径（先用配置根锚定，再平衡括号扫描）、运行器**私有 temp 子目录**（`call-*/dsh-*`，按“等于或位于 temp 根内”判定）。
+- `powershell`/`bash` 的 runner-failure 说明继续区分「运行器/工作区未就绪」与「命令被内核拒绝」，并明确这类初始化失败**不能**用 `sandbox_request` 绕过；同一会话内首次出现时弹一条 error 通知给人类。
+- `/sandbox doctor` 的「工作区就绪（真实根）」保留；`sandbox_request` 描述与 guidelines 保留防审批轰炸规则。四个审批选项、reason 语义、黄色卡片与语言规则均不变。
+- 测试与验证：新增 vendored 后端单元测试（继承标签只改 DACL、畸形 ACE 边界、早命中不掩盖后续损坏）；Windows 集成测试的父子目录 ACL 布局把临时 deny 清理放进 `t.after`，失败时也能清理；`npm run check:pack` 从 tarball 干净安装后**从安装后的插件解析包内 runner**，校验 `PROVENANCE.json`，并在隔离父子 ACL 布局实际运行（授权成功、标签不变、根外仍拒写）。
+- 文档修正：DACL 备份/恢复改用 PowerShell `Get-Acl`/`Set-Acl` 的 **Access（DACL）** 一节（隔离同名目录实测：还原后 SDDL 与原 DACL 完全一致，owner/group 与 Low 标签不变）；不再推荐 `icacls /save`/`/restore`（实测非管理员下 `/restore` 处理 0 个文件并报 1300，且 `/save` 备份带 SACL 段）；补充 vendored 来源/许可/重建说明，并更正“完全不改 ACL”的说法。
+
 ## 0.4.1
 
 - 简化审批语言规则：用户提示词只要出现中文就用中文，中英混合中文优先；无中文且含英文字母就用英文。移除词数、技术术语过滤和显式语言指令识别。

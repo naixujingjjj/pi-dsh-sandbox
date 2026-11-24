@@ -32,7 +32,7 @@
 | `dshRoot` | string（绝对路径） | 未设置 | DSH 安装根；等价于 `<dshRoot>\node_modules\@deepseek-ai\dsh-sandbox-windows-acl\lib\runner.js`。与 `runnerModule` 同时设置时 `runnerModule` 优先 |
 | `tempRoot` | string（绝对路径） | `%LOCALAPPDATA%\pi-dsh-sandbox\tmp` | 运行器 `--temp` 的根目录；必须在工作区**之外**。插件会尝试创建它 |
 
-`runnerModule`、`dshRoot`、`tempRoot` 都是**可选**的。正常情况下只写 `mode` 即可；本包自带固定版本的 DSH 依赖，不需要全局 DSH，也不需要手工指定路径。
+`runnerModule`、`dshRoot`、`tempRoot` 都是**可选**的。正常情况下只写 `mode` 即可；本包**内置**（vendored）已打补丁的后端，不需要全局 DSH，也不需要手工指定路径。未显式配置时的查找顺序：包内 `vendor/dsh-sandbox-windows-acl/lib/runner.js` → 插件 `node_modules` → 全局 DSH。
 
 ### 2.1 完整但不必全填的示例
 
@@ -57,7 +57,7 @@
 }
 ```
 
-显式指定运行器（仅当你确实要覆盖自带依赖时）：
+显式指定运行器（仅当你确实要覆盖包内 vendored 后端时）：
 
 ```json
 {
@@ -159,9 +159,9 @@ extraRoots
 
 ## 9. 版本固定
 
-- 运行依赖 `@deepseek-ai/dsh-sandbox-windows-acl` 固定为 **`0.2.2-rc.5`**，并记录在 `package-lock.json` 中。
-- 运行器以 argv 前缀协议调用；不同后端版本可能改变行为或参数契约。不要用 `npm update` 随意漂移它；升级应连同本插件一起测试。
-- `/sandbox status` 会显示实际使用的 runner 路径与后端版本；如果它和预期不一致，先检查是否有 `runnerModule`/`dshRoot` 覆盖。
+- 运行依赖 `@deepseek-ai/dsh-sandbox-windows-acl` 在包内**内置**为 vendored 构建：上游 `0.2.2-rc.5` 源码 + 本地补丁，包内版本标识 **`0.2.2-rc.5+pi-dsh.1`**（`vendor/dsh-sandbox-windows-acl/pin.json` 固定上游 tarball 与补丁哈希，`PROVENANCE.json` 记录产物哈希）。
+- 运行器以 argv 前缀协议调用；不同后端版本可能改变行为或参数契约。不要用 `npm update` 随意漂移插件依赖；升级应连同本插件一起测试。
+- `/sandbox status` 会显示实际使用的 runner 路径与后端版本；正常情况下来源应为 `vendor`。如果它指向 `node_modules` 或全局 DSH，先检查是否有 `runnerModule`/`dshRoot` 覆盖，或包目录是否完整。
 
 ## 10. 配置改动后
 

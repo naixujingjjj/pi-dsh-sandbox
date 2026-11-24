@@ -25,6 +25,7 @@ git status --short
 
 ```powershell
 npm ci --include=optional
+npm run vendor:check   # 确认包内 vendored 后端与 PROVENANCE.json 一致
 npm run verify:windows
 npm run pack
 npm run check:package
@@ -40,12 +41,14 @@ npm run pack -- --out-dir D:\releases\pi-dsh-sandbox
 
 每个版本包含：
 
-- `pi-dsh-sandbox-<版本>.tgz`：供 npm 安装的插件包，不含依赖；安装时仍需联网。
+- `pi-dsh-sandbox-<版本>.tgz`：供 npm 安装的插件包，含 `vendor/dsh-sandbox-windows-acl/`（打好补丁的后端源码、编译产物、上游 `LICENSE`、`pin.json`、`PROVENANCE.json`、`patches/`），**不含** npm 依赖；安装时仍需联网。
 - 同名 `.tgz.sha256`：SHA256 校验值。
 - 同名 `.tgz.manifest.json`：文件清单、版本及校验值。
 - `latest.json`：本地最新版本索引。
 
 升级版本后打包时，脚本会把前一版产物移到输出目录的 `archive/`，保留历史文件。
+
+如果本次改动了 ACL 后端，先用 `npm run vendor:build` 从 `pin.json` 固定的上游 tarball 重建 `vendor/`（校验上游 SHA-256、应用 `patches/`），再跑 `vendor:check`。不要手工编辑 `vendor/**/lib/`，也不要声称上游发布版已包含该补丁。
 
 在 GitHub 建立对应版本的 Release 后，将当前 `.tgz` 与校验文件作为附件上传。源码中没有预填未知的仓库地址，也没有宣称已发布到 npm。
 

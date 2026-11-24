@@ -16,6 +16,8 @@ import {
 	type ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 import { errorMessage } from "./errors.ts";
+import { classify } from "./classify.ts";
+import { diagnoseRunnerFailure } from "./readiness.ts";
 import {
 	APPROVAL_AUDIT_ENTRY,
 	APPROVAL_OPTIONS,
@@ -429,6 +431,25 @@ async function handleDoctor(pi: ExtensionAPI, ctx: ExtensionCommandContext, stat
 		// 7. exit codes are mirrored exactly.
 		const exitCode = await probe(state, workspace, temp, "workspace-write", nodeEval("process.exit(42)"));
 		record("退出码透传", exitCode.exitCode === 42, `exit=${String(exitCode.exitCode)}（期望 42）`);
+
+		// 8. the REAL session root: a temp workspace that grants fine proves the backend works, not
+		// that this workspace can be granted. Run the same confined no-op against the session root so
+		// a readiness fault (for example a root without WRITE_OWNER for the Low label) surfaces here
+		// instead of on every later tool call.
+		const realRoot = await probe(state, state.root, temp, "workspace-write", nodeEval("0"));
+		const realRootClass = classify({ exitCode: realRoot.exitCode, stderr: realRoot.stderrTail, output: realRoot.stderrTail });
+		const readiness = realRootClass.kind === "runner-failure"
+			? diagnoseRunnerFailure({ signature: realRootClass.signature, root: state.root, tempRoot: state.runtime.tempRoot })
+			: null;
+		record(
+			"工作区就绪（真实根）",
+			realRoot.exitCode === 0,
+			realRoot.exitCode === 0
+				? `就绪：${state.root}`
+				: readiness
+					? `未就绪（runner-failure，命令未执行）：\n${readiness.lines.join("\n")}`
+					: `exit=${String(realRoot.exitCode)}；${realRoot.stderrTail.trim() || "无输出"}`,
+		);
 	} catch (error) {
 		record("执行探测", false, errorMessage(error));
 	} finally {
@@ -450,7 +471,8 @@ function formatDoctor(steps: DoctorStep[]): string {
 		`${PLUGIN_NAME} doctor：${failed === 0 ? "全部通过" : `${failed} 项失败`}（${steps.length} 项）`,
 		...lines,
 		"",
-		"说明：自检只在独立临时工作区里授权，结束后递归删除，不触碰会话工作区。",
+		"说明：除「工作区就绪（真实根）」外，自检只在独立临时工作区里授权，结束后递归删除，不触碰会话工作区。",
+		"「工作区就绪」用会话真实根（与正常执行相同的常驻 ACE/Low 标签）；失败时表示插件无法授权这个工作区，不是命令越界。",
 	].join("\n");
 }
 

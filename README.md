@@ -6,7 +6,7 @@
 
 ## 它做什么
 
-- **受限执行**：`powershell`、`bash`、`!`/`!!` 通过 `@deepseek-ai/dsh-sandbox-windows-acl` 的受限令牌运行器执行；根外写入/删除被内核拒绝。
+- **受限执行**：`powershell`、`bash`、`!`/`!!` 通过包内**内置（vendored）**的 `@deepseek-ai/dsh-sandbox-windows-acl` 受限令牌运行器执行；根外写入/删除被内核拒绝。
 - **写入落盘**：`write`/`edit` 保留 Pi 原有语义（相对路径、精确文本匹配、BOM/换行、diff、每文件队列），只有实际 `mkdir`/写文件交给受限进程内的 helper。
 - **受控出口**：模型可调用 `sandbox_request` 申请**一次性**以 off（不经过沙盒）执行一条精确命令，每次都要人类四项审批；人类也可用 `/sandbox exec`。
 - **失败即关闭**：缺运行器、平台不支持、配置错误、审批 UI 不可用等情况都不会退回未受限执行。
@@ -21,10 +21,11 @@
 
 ## 常驻副作用（安装前请读）
 
-`workspace-write` 会在**授权根**上留下跨会话、跨重启的改动：一条能力 SID 允许 ACE、一条 `FILE_DELETE_CHILD` 拒绝 ACE，以及 **Low 完整性标签**。它们**不会**随会话结束或卸载插件撤销；Low 标签还会让其它以 Low 完整性运行的进程写这个目录树。
+`workspace-write` 会在**授权根**上留下跨会话、跨重启的改动：一条能力 SID 允许 ACE、一条 `FILE_DELETE_CHILD` 拒绝 ACE，以及（当根还没有通过继承处于 Low 时）**Low 完整性标签**。它们**不会**随会话结束或卸载插件撤销；Low 标签还会让其它以 Low 完整性运行的进程写这个目录树。
 
+- 0.4.2 起包内 vendored 后端在根已通过继承具备 Low no-write-up 时只改 DACL、不重写现有标签，因此这类布局**不需要额外补 `WRITE_OWNER`/`(WO)`**；正常授权仍会写上面两条 ACE（那是沙盒授权本身）。
 - 不可逆的“通用回滚”很危险：**不要**用 `icacls <根> /reset /T`，它会抹掉你原有的自定义 ACL。
-- 需要保留内容时，在首次使用前备份 DACL，并按备份对应的父目录精确恢复。
+- 需要保留内容时，在首次使用前备份 DACL（用 `Get-Acl` 只取 Access 一节）；恢复时用 `Set-Acl` 只写回 DACL，owner/group 与 Low 标签不变。
 - 可丢弃的临时副本用完即弃，是最简单的回滚。
 
 细节、限制与备份示例见 [docs/security.md](docs/security.md)。**不要为了卸载插件而删除需要保留的真实项目。**
@@ -36,7 +37,7 @@
 | 平台 | Windows 10/11 **x64**；其它平台在 confined 模式下报 `SANDBOX_UNAVAILABLE` |
 | Node | **建议 24 LTS**；最低 **22.19**（与 Pi 的要求一致） |
 | Pi | `@earendil-works/pi-coding-agent` **>= 1.6** |
-| 运行器 | 本包依赖固定版本 `@deepseek-ai/dsh-sandbox-windows-acl@0.2.2-rc.5`；无需全局 DSH |
+| 运行器 | 本包**内置**（vendored）已打补丁的 `@deepseek-ai/dsh-sandbox-windows-acl@0.2.2-rc.5+pi-dsh.1`（`vendor/`）；无需全局 DSH，也不用改 `node_modules` |
 | 可选 | Git for Windows 的 `bash.exe`（否则 `bash` 与 `!` 会被拒绝） |
 | 网络 | 安装运行依赖需要联网 |
 
@@ -65,7 +66,7 @@ pi install C:\src\pi-dsh-sandbox
 **不能**把 `.tgz` 直接交给 `pi install`：Pi 会把文件路径当作扩展源码，而不是一个待安装的包。先把 tarball 安装到一个固定位置，再用该位置里的包目录：
 
 ```powershell
-$tgz = "C:\src\downloads\pi-dsh-sandbox-0.4.1.tgz"   # 换成实际文件
+$tgz = "C:\src\downloads\pi-dsh-sandbox-0.4.2.tgz"   # 换成实际文件
 $extRoot = "$env:LOCALAPPDATA\pi-extensions"
 
 New-Item -ItemType Directory -Force -Path $extRoot | Out-Null
@@ -75,7 +76,7 @@ npm install --prefix $extRoot --include=optional --omit=dev "$tgz"
 pi install "$extRoot\node_modules\pi-dsh-sandbox"
 ```
 
-- `.tgz` 里是源码与文档，**不是**自带全部依赖的离线包；`npm install` 会联网取依赖。
+- `.tgz` 里是源码、文档与包内 vendored 后端（`vendor/`），**不是**自带全部依赖的离线包；`npm install` 会联网取 `koffi`/`yaml`/DSH 运行依赖。
 - 不要把 `.tgz` 解压后直接 `pi install <解压目录>`，除非你已在那个目录里装好运行依赖（见上一节）。
 - 如果 `npm` 提示缺少 `koffi` 或 `@deepseek-ai/dsh-*`，见 [docs/troubleshooting.md](docs/troubleshooting.md)。
 

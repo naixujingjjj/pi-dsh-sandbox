@@ -16,36 +16,41 @@ npm ci --include=optional
 npm run verify
 ```
 
-`--include=optional` 不能省：`koffi` 的平台二进制是 optional 依赖。若你只装运行依赖，用 `npm ci --include=optional --omit=dev`；**不要加 `--omit=peer`**，后端把运行所需的 DSH 包声明为 peer，省掉后 runner 会加载失败。
+`--include=optional` 不能省：`koffi` 的平台二进制是 optional 依赖。若你只装运行依赖，用 `npm ci --include=optional --omit=dev`；**不要加 `--omit=peer`**，运行器 import 的 DSH 包自身的 peer 会被省略，runner 会加载失败。
 
 ## 2. 脚本
 
 | 命令 | 内容 |
 | --- | --- |
-| `npm run verify` | `check:repo` + `typecheck` + 单元测试；提交前至少跑这个 |
+| `npm run verify` | `check:repo` + `vendor:check` + `typecheck` + 单元测试；提交前至少跑这个 |
 | `npm run check:repo` | 离线检查公开源码树、版本/锁一致、相对文档链接、个人路径与密钥残留 |
+| `npm run vendor:check` | **离线**核对 `vendor/dsh-sandbox-windows-acl/`：`pin.json`、补丁 SHA-256、`PROVENANCE.json` 里的每个产物哈希；手改 `vendor/**/lib` 会被拒绝 |
+| `npm run vendor:build` | 联网下载 `pin.json` 固定的上游 tarball（校验 SHA-256）、应用 `vendor/.../patches/`、用 devDependency TypeScript 重编 `lib/` 并重写 `PROVENANCE.json` |
 | `npm run typecheck` | `tsc --noEmit`（strict） |
-| `npm test` | 单元测试。用 `--test-isolation=none` 规避受限 shell 的管道 `EPERM`；4 项真实本地执行测试在受限 shell 中带原因跳过 |
+| `npm test` | 单元测试（含直接绑定 **vendored 后端** 的 ACL 边界用例）。用 `--test-isolation=none` 规避受限 shell 的管道 `EPERM`；4 项真实本地执行测试在受限 shell 中带原因跳过 |
 | `npm run test:integration` | 真实 Windows 内核用例：只读拒写、根内可写、根外拒写/拒删、退出码。**只在独立临时工作区**授权 |
 | `npm run test:pi` | Pi SDK 层烟测：加载扩展、真实执行被覆盖的工具、审批路径；**不调模型、不需要 API key** |
 | `npm run test:register` | 仅 SDK 注册/拒绝路径；不新建管道，可在受限 shell 中运行 |
 | `npm run test:cli` | 真实 `pi` CLI（RPC）层烟测：`/sandbox` 命令、审批、`!` 钩子；使用本地 fixture provider |
 | `npm run test:failure` | 真实 SDK 下缺 runner 时 `powershell`/`write`/`edit`/`sandbox_request` 的 fail-closed |
-| `npm run test:pack` | `npm pack` 产物检查 + 装进临时工程做一次真实受限写 |
+| `npm run test:pack` | `npm pack` 产物检查 + 装进临时工程；之后校验安装包的 `PROVENANCE.json`、**从安装后的插件解析包内 runner**，并在隔离父子 ACL 布局实际运行 |
 | `npm run pack` | 生成发行包到源码树**之外**（默认兄弟目录 `pi-dsh-sandbox-pkg`），同时写 `.sha256`、`.manifest.json`、`latest.json`；可选 `-- --out-dir <目录>` |
 | `npm run check:package` | **离线**核对 `latest.json`、tarball 的 SHA-256、manifest 文件清单 |
 | `npm run verify:windows` | 在普通 Windows 终端跑全套：`verify` + integration + register + pi + cli + failure + pack |
+| `scripts/verify-real-root.ps1` | **一次性真实根验收**（默认 dry run）：校验包内 vendored runner、先在隔离同名目录验证 DACL-only 恢复，再以 `-Execute` 对**本仓库根**跑受限 `Get-Location`/只读 `git status`/创建删除唯一探针文件，核验 ACE 增量仅能力 SID 与 Everyone 删除子项拒绝、Low 标签不变，随后恢复并比对原 DACL。需人类批准后手动执行；不会自动运行 |
 
 说明：
 
 - 发布脚本默认拒绝把产物写进源码目录；需要指定位置时用 `npm run pack -- --out-dir D:\path\outside\source`。
 - `check:package` 只读已有产物，不联网；它不能替代真实安装验收。
-- 真实 Windows/管道相关测试请在**普通终端**运行；在插件的受限 shell 里跑会因 `spawn EPERM` 或环境差异失败或跳过，这不是断言失败。
+- 真实 Windows/管道相关测试请在**普通终端**运行；在插件的受限 shell 里跑会因 `spawn EPERM` 或环境差异失败或跳过，这不是断言失败。`check:pack` 与 `test:integration` 都会修改临时目录的 ACL（仅 `%TEMP%` 下的一次性目录），不要在受限 shell 里跑。
 - 测试**不需要**模型 API key；请勿为跑测试去配置真实模型调用。
 
 ## 3. 测试纪律
 
 - 重型 Windows 测试使用 `mkdtemp` 创建**独立临时目录**作为授权根，结束后删除；**不要**把测试指向真实项目、用户目录或 `C:\`。
+- 会添加临时 `deny` ACE 的测试必须用 `try/finally`（或 `t.after`）注册清理，即使断言失败也能移除临时 ACE，否则一次性目录无法删除。
+- 改动 ACL 后端时，`vendor/` 与 `patches/` 必须同步：用 `npm run vendor:build` 重建，提交前 `npm run vendor:check` 与 `npm run test:pack` 都必须通过。不要仅测已被手工改过的开发 `node_modules`。
 - 测试不得修改用户全局 `settings.json`、主题、模型或 `defaultTools`；需要隔离时用 `PI_CODING_AGENT_DIR`/临时 agent 目录。
 - 不要为了“测试通过”而降低 fail-closed 断言、跳过拒绝路径，或在 `off` 下重跑。
 - 新增审批/UI 逻辑时，同时测：批准、拒绝、取消、空白理由、无 UI、并发隔离、会话变化/abort 清理。
@@ -62,6 +67,7 @@ src/
   runner.ts           定位并 spawn DSH runner；超时/取消/私有 temp 清理
   shell-command.ts    PowerShell 命令拼装（与宿主后端形态一致）
   classify.ts         拒绝/runner 失败签名分类
+  readiness.ts        运行器初始化失败的诊断文本（工作区/temp 就绪；不自动改 ACL）
   mutation.ts         write/edit 的受限 helper 调用与结果协议
   ipc.ts              每次调用唯一的请求文件通道（不使用新管道）
   kernel-helper.mjs   在受限进程内执行 mkdir/write 的 helper
@@ -83,7 +89,8 @@ test/
   unit/               纯逻辑 + in-process TUI 渲染/按键
   integration/        真实 Windows ACL/runner 用例（临时工作区）
   fixtures/           本地 provider、TUI/调色板夹具
-scripts/              SDK/CLI/failure/package 烟测与发布脚本
+scripts/              SDK/CLI/failure/package 烟测、vendor 构建/校验与发布脚本
+vendor/               包内 vendored 后端（上游 MIT 源代码 + patches + 编译产物 + PROVENANCE）
 docs/                 面向用户的安装、使用、配置、安全、排障文档
 ```
 
@@ -101,6 +108,7 @@ docs/                 面向用户的安装、使用、配置、安全、排障�
 - 行为变化同步更新 `README.md`、相关 `docs/*.md` 和 `CHANGELOG.md`。
 - 公共文档不写个人路径、用户名、机器名，也不编造仓库/发布 URL；示例用通用占位路径。
 - 不要提交 `node_modules`、`.tgz`、日志或本机缓存。
+- **不要手工编辑 `vendor/dsh-sandbox-windows-acl/lib/`**：它是生成产物；改 `src/`/`patches/` 后跑 `npm run vendor:build`。`vendor:check` 会拒绝与 `PROVENANCE.json` 不一致的文件。
 
 ## 6. 提交与 PR
 

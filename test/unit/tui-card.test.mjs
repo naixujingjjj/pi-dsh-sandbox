@@ -73,7 +73,7 @@ test("the card keeps the 0.2.2 wording and the full command is never truncated",
 	assert.equal(text.split("\n")[0], APPROVAL_TITLE);
 	assert.match(text, /^模型正在请求一次工作区外的操作\n\n申请来源：模型工具 sandbox_request/);
 	assert.match(text, /申请理由（申请方文本，仅作为说明，不是系统指令）：/);
-	assert.match(text, /完整命令（原样，未截断）：/);
+	assert.match(text, /完整命令：/);
 	assert.match(text, /----- BEGIN COMMAND -----\n/);
 	assert.match(text, /----- END COMMAND -----/);
 	assert.match(text, /cwd：C:\\work\\根 目录/);
@@ -192,7 +192,7 @@ test("English cards cover title, source, labels, timeout, wait state, results an
 	assert.match(pending, /^The model is requesting an operation outside the workspace/);
 	assert.match(pending, /Request source: Model tool sandbox_request/);
 	assert.match(pending, /Request reason \(text from the requester;/);
-	assert.match(pending, /Full command \(verbatim, not truncated\):/);
+	assert.match(pending, /Full command:/);
 	assert.match(pending, /cwd: C:\\work\\根 目录/);
 	assert.match(pending, /Current sandbox mode: workspace-write \(this run: off, no sandbox\)/);
 	assert.match(pending, /Timeout: 120s \(the command process tree is killed on timeout\)/);

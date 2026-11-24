@@ -239,7 +239,7 @@ test("a live English request renders its whole card in English and keeps the fou
 	assert.match(text, /^─+\n▏ The model is requesting an operation outside the workspace/m);
 	assert.match(text, /Request source: Model tool sandbox_request/);
 	assert.match(text, /Request reason \(text from the requester;/);
-	assert.match(text, /Full command \(verbatim, not truncated\):/);
+	assert.match(text, /Full command:/);
 	assert.match(text, /cwd: C:\\work\\根 目录/);
 	assert.match(text, /Current sandbox mode: workspace-write \(this run: off, no sandbox\)/);
 	assert.match(text, /Timeout: 90s/);

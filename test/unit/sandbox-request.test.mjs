@@ -303,7 +303,7 @@ test("a real tool request takes its UI language from the current user branch, no
 	assert.match(dialogs[0].title, /^The model is requesting an operation outside the workspace/);
 	assert.match(dialogs[0].title, /Request source: Model tool sandbox_request \(tool call tool-call-1\)/);
 	assert.match(dialogs[0].title, /Request reason \(text from the requester;/);
-	assert.match(dialogs[0].title, /Full command \(verbatim, not truncated\):/);
+	assert.match(dialogs[0].title, /Full command:/);
 	assert.match(dialogs[0].title, /Current sandbox mode: workspace-write \(this run: off, no sandbox\)/);
 	assert.doesNotMatch(dialogs[0].title, /模型正在请求|申请来源|申请理由|完整命令/);
 	assert.deepEqual(dialogs[0].options, ["Yes", "No", "Yes, and reason…", "No, and reason…"]);

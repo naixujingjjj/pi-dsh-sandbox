@@ -26,6 +26,7 @@ import { registerSandboxRequestTool } from "./tools/sandbox-request.ts";
 import { registerBashTool, registerPowerShellTool, registerUserBash } from "./tools/shell-tools.ts";
 import { registerApprovalCardRenderer } from "./tui/entry.ts";
 import { clearLiveApprovals, restoreHistoricalApprovalLocales } from "./tui/live.ts";
+import { resetReadinessNotifications } from "./readiness.ts";
 
 const pluginRoot = pluginRootOf(import.meta.url);
 
@@ -91,6 +92,7 @@ export default function piDshSandbox(pi: ExtensionAPI): void {
 		// Re-read the global settings and reset the mode from configuration. A resumed, forked or
 		// reloaded session never inherits a wider mode from history.
 		invalidateRuntime();
+		resetReadinessNotifications();
 		if (event.reason !== "reload") {
 			invalidateSessions();
 			clearLiveApprovals();

@@ -7,6 +7,19 @@ export const requiredPackageFiles = [
 	"src/index.ts", "src/kernel-helper.mjs", "src/runner.ts", "src/mutation.ts", "src/approval.ts", "src/reason.ts",
 	"src/locale.ts", "src/i18n.ts",
 	"src/tools/sandbox-request.ts", "src/tui/panel.ts", "src/tui/card.ts", "src/tui/theme.ts",
+	// The patched backend travels inside the package; a tarball without it cannot authorize a
+	// workspace whose root only inherits the Low label (see vendor/.../PATCH.md).
+	"vendor/dsh-sandbox-windows-acl/package.json",
+	"vendor/dsh-sandbox-windows-acl/pin.json",
+	"vendor/dsh-sandbox-windows-acl/PROVENANCE.json",
+	"vendor/dsh-sandbox-windows-acl/PATCH.md",
+	"vendor/dsh-sandbox-windows-acl/LICENSE",
+	"vendor/dsh-sandbox-windows-acl/lib/runner.js",
+	"vendor/dsh-sandbox-windows-acl/lib/index.js",
+	"vendor/dsh-sandbox-windows-acl/lib/acl.js",
+	"vendor/dsh-sandbox-windows-acl/src/acl.ts",
+	"vendor/dsh-sandbox-windows-acl/src/win32-abi.ts",
+	"vendor/dsh-sandbox-windows-acl/patches/0001-low-label-guard-and-acl-walk-bounds.patch",
 ];
 
 export function assertPackageFiles(paths) {

@@ -21,8 +21,14 @@ import type { ConfinedMode } from "./policy.ts";
 
 export const ACL_PACKAGE = "@deepseek-ai/dsh-sandbox-windows-acl";
 const ACL_RUNNER_RELATIVE = ["node_modules", ACL_PACKAGE, "lib", "runner.js"] as const;
+/**
+ * The patched backend shipped INSIDE this package (see vendor/dsh-sandbox-windows-acl/PATCH.md).
+ * It is preferred over any node_modules copy: a hand-edited dependency disappears on `npm ci`, a
+ * `npm pack`/clean install, or an update, while this path travels with the tarball and the fix.
+ */
+const VENDOR_RUNNER_RELATIVE = ["vendor", "dsh-sandbox-windows-acl", "lib", "runner.js"] as const;
 
-export type RunnerSource = "config:runnerModule" | "config:dshRoot" | "plugin" | "installed-dsh";
+export type RunnerSource = "config:runnerModule" | "config:dshRoot" | "vendor" | "plugin" | "installed-dsh";
 
 export interface RunnerLocation {
 	/** Absolute path of `lib/runner.js`. */
@@ -138,6 +144,12 @@ export function locateRunner(input: LocateRunnerInput): LocateResult {
 		return { location: { modulePath: candidate, version: readVersion(candidate), source: "config:dshRoot" }, attempted };
 	}
 
+	const vendored = join(input.pluginRoot, ...VENDOR_RUNNER_RELATIVE);
+	attempted.push(vendored);
+	if (isFile(vendored)) {
+		return { location: { modulePath: vendored, version: readVersion(vendored), source: "vendor" }, attempted };
+	}
+
 	const bundled = join(input.pluginRoot, ...ACL_RUNNER_RELATIVE);
 	attempted.push(bundled);
 	if (isFile(bundled)) {
@@ -184,6 +196,8 @@ export function runnerLookupFailure(attempted: string[]): SandboxError {
 			...attempted.map((path) => `  - ${path}`),
 			"Fix: install the DSH CLI globally (npm i -g @deepseek-ai/dsh) or run `npm install --include=optional` in the plugin directory,",
 			"or set piDshSandbox.runnerModule / --sandbox-runner to the absolute path of lib/runner.js.",
+			"A package installed from its tarball carries the patched runner at vendor/dsh-sandbox-windows-acl/lib/runner.js;",
+			"if that path is missing the install is incomplete: reinstall the package instead of editing node_modules by hand.",
 		].join("\n"),
 	);
 }

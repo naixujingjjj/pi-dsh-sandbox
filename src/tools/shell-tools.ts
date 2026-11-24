@@ -19,6 +19,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { classify } from "../classify.ts";
 import { SandboxError, errorMessage } from "../errors.ts";
+import { diagnoseRunnerFailure, shouldNotifyReadiness, type ReadinessDiagnosis } from "../readiness.ts";
 import { composePowerShellCommand } from "../shell-command.ts";
 import type { AgentToolResultLike } from "./types.ts";
 import { runRunner, type RunnerInvocation } from "../runner.ts";
@@ -131,7 +132,12 @@ export function confinedBashOperations(
 	};
 }
 
-function sandboxNote(state: SessionState, kind: "denied" | "runner-failure", signature?: string): string {
+function sandboxNote(
+	state: SessionState,
+	kind: "denied" | "runner-failure",
+	signature?: string,
+	diagnosis?: ReadinessDiagnosis | null,
+): string {
 	if (kind === "denied") {
 		return (
 			`\n\n[sandbox: ${state.mode}] 写操作被 Windows 内核拒绝（匹配：${signature ?? "denied"}）。` +
@@ -139,9 +145,17 @@ function sandboxNote(state: SessionState, kind: "denied" | "runner-failure", sig
 			"若确实需要这一次越界操作，可调用 sandbox_request 提交具体命令与你的申请理由（人类四项审批：批准只执行这一次；拒绝时可给出新的执行方向，代理据新方向继续）。"
 		);
 	}
+	if (diagnosis) {
+		return (
+			`\n\n[sandbox: runner-failure] ${diagnosis.note}\n` +
+			`\n诊断：${diagnosis.api} failed (Win32 ${diagnosis.win32Code ?? "?"}) on ${diagnosis.path}；` +
+			"完整成因与修复步骤见 /sandbox doctor 的「工作区就绪」一项与 docs/troubleshooting.md。"
+		);
+	}
 	return (
 		`\n\n[sandbox: runner-failure] 沙盒运行器自身失败（${signature ?? "windows-acl-run"}），命令没有被执行。` +
-		"这是 fail-closed：插件不会退回未受限执行。运行 /sandbox doctor 检查运行器。"
+		"这是 fail-closed：插件不会退回未受限执行。运行 /sandbox doctor 检查运行器；" +
+		"若 doctor 显示运行器/工作区未就绪，请把该诊断报告给人类，不要改用 sandbox_request 绕过初始化失败。"
 	);
 }
 
@@ -156,7 +170,14 @@ export function annotateShellResult<T extends AgentToolResultLike>(
 	// and the denial texts can appear on either side.
 	const classification = classify({ exitCode: 1, stderr: output, output });
 	if (classification.kind === "none" || classification.kind === "command-failed") return result;
-	const note = sandboxNote(state, classification.kind, classification.signature);
+	const diagnosis = classification.kind === "runner-failure"
+		? diagnoseRunnerFailure({
+			signature: classification.signature,
+			root: state.root,
+			tempRoot: state.runtime.tempRoot,
+		})
+		: null;
+	const note = sandboxNote(state, classification.kind, classification.signature, diagnosis);
 	const content = Array.isArray(result.content) ? [...result.content] : [];
 	for (let index = content.length - 1; index >= 0; index -= 1) {
 		const block = content[index] as { type?: string; text?: string } | undefined;
@@ -166,6 +187,37 @@ export function annotateShellResult<T extends AgentToolResultLike>(
 		}
 	}
 	return result;
+}
+
+/**
+ * Tell the human once per session/root when the sandbox cannot initialize for the workspace: the
+ * model sees the same text in the tool result, but the person at the keyboard needs it too.
+ */
+function notifyReadiness(
+	state: SessionState,
+	ctx: ExtensionToolContext,
+	result: AgentToolResultLike,
+	tail: OutputTail,
+): void {
+	if (!result.isError) return;
+	const output = outputTailText(tail);
+	const classification = classify({ exitCode: 1, stderr: output, output });
+	if (classification.kind !== "runner-failure") return;
+	const diagnosis = diagnoseRunnerFailure({
+		signature: classification.signature,
+		root: state.root,
+		tempRoot: state.runtime.tempRoot,
+	});
+	if (!diagnosis) return;
+	if (!shouldNotifyReadiness(state.sessionId, state.root, diagnosis)) return;
+	try {
+		ctx.ui.notify(
+			`[sandbox: 工作区未就绪] ${diagnosis.note}\n${diagnosis.lines.join("\n")}`,
+			"error",
+		);
+	} catch {
+		// A notification failure must not change the tool result or the fail-closed outcome.
+	}
 }
 
 export function registerPowerShellTool(pi: ExtensionAPI, pluginRoot: string): void {
@@ -184,7 +236,9 @@ export function registerPowerShellTool(pi: ExtensionAPI, pluginRoot: string): vo
 				operations: confinedPowerShellOperations(state, tail),
 			});
 			const result = await definition.execute(id, params, signal, onUpdate, ctx);
-			return annotateShellResult(result, state, tail);
+			const annotated = annotateShellResult(result, state, tail);
+			notifyReadiness(state, ctx, annotated, tail);
+			return annotated;
 		},
 	});
 }
@@ -217,7 +271,9 @@ export function registerBashTool(pi: ExtensionAPI, pluginRoot: string): void {
 				commandPrefix,
 			});
 			const result = await definition.execute(id, params, signal, onUpdate, ctx);
-			return annotateShellResult(result, state, tail);
+			const annotated = annotateShellResult(result, state, tail);
+			notifyReadiness(state, ctx, annotated, tail);
+			return annotated;
 		},
 	});
 }

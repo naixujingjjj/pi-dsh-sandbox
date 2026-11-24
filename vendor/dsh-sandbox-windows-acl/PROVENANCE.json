@@ -1,0 +1,56 @@
+{
+  "package": "@deepseek-ai/dsh-sandbox-windows-acl",
+  "upstreamVersion": "0.2.2-rc.5",
+  "upstreamTarballSha256": "4146e38304117a3f019b169c205c20c4121c1433826d2b01559d49938c0adbc1",
+  "license": "MIT",
+  "vendoredVersion": "0.2.2-rc.5+pi-dsh.1",
+  "patches": [
+    {
+      "file": "patches/0001-low-label-guard-and-acl-walk-bounds.patch",
+      "sha256": "46b3ca723c456b288fdff3cc3b09ccd0681ccfe671ec4152a967bc2dfe731ecd"
+    }
+  ],
+  "build": {
+    "script": "scripts/build-vendor-runner.mjs",
+    "typescriptVersion": "5.9.3",
+    "command": "node node_modules/typescript/bin/tsc -p tsconfig.vendor.json",
+    "tsconfig": {
+      "target": "ES2022",
+      "module": "NodeNext",
+      "moduleResolution": "NodeNext",
+      "rewriteRelativeImportExtensions": true,
+      "allowImportingTsExtensions": true,
+      "noCheck": true,
+      "declaration": false,
+      "sourceMap": false
+    }
+  },
+  "outputs": {
+    "LICENSE": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be",
+    "PATCH.md": "d09e0e4ef742c09de8ff08b244d479c104e6efd9da0c062757d02308c353e900",
+    "lib/acl-skill.js": "7160e35255f3730fbba582e6d431239f2d3e5b36bfc94de21a31a26172e1c574",
+    "lib/acl.js": "a9f581f92661c426194221ed06593541af35df3314383593bf16ea9010ab49f6",
+    "lib/ffi.js": "6c62c50daf266eb10b31fdcf56faf4d5029ed86cd4a58f8158dd6172ada5bd92",
+    "lib/grant.js": "e7d4927378fac694d347f60734aba2e06b49f6a61863199e192eeef2d642c009",
+    "lib/index.js": "9f1259118f6d485a6b7653f3db89b9c1d58b2bfa217e5505180b2df36d1a8e15",
+    "lib/path-boundary.js": "0b3404effcd791ad22497436c5bfc01f63640225f579008ff8fc019ec3c99910",
+    "lib/runner.js": "fef2158d545c885380be4ad029de57bb17a5f0431ca3d96dcab865c3941ff3a2",
+    "lib/spawn.js": "bb01f8214c05b31701e5519456748b49c72affdb1ced01404e8e80681dd49f2b",
+    "lib/token.js": "82c063bc3a832e641322d290e349c07c32620504928cba191a981c1ea7134f6e",
+    "lib/win32-abi.js": "4b74ee4e81b2422e2564bed5e9e0c15b17714f0e41ac3523456f90ff0b064f54",
+    "lib/workspace-sid.js": "05db17e23f6ede1133eab1fd8dd46e08172766647cbb7cc5a70444272588efa7",
+    "package.json": "2c93c9a06cc825bf0326258574667e6ef2bb342be6341991178e6701ec49ec4d",
+    "patches/0001-low-label-guard-and-acl-walk-bounds.patch": "46b3ca723c456b288fdff3cc3b09ccd0681ccfe671ec4152a967bc2dfe731ecd",
+    "src/acl-skill.ts": "a04e2f6433a039d5bc24b9c0f9aab3b2f4a282da0910554252570f85d4cf6916",
+    "src/acl.ts": "82740e1e97714e26e8f02c6724dded915a69f426bbeff70547d90f82ebabc3d6",
+    "src/ffi.ts": "9e90ba38afee21078bfa93c976459a131e8f50fdafd22a8fcf3a3433117b1535",
+    "src/grant.ts": "2d23a95f2f3629707034a0412dc2903df9b5815dfb7a54af3be2a19510024631",
+    "src/index.ts": "15753fd4aab6654c0a11f18a0b7130e7664f7135211083000040ba9036af5ad1",
+    "src/path-boundary.ts": "4215c407d44f3b3a39bd70a9304efe71950ef283d412e2a69340e11d0ed2de8a",
+    "src/runner.ts": "542b77278d974f5f93c2a0b925468e96e52737366ed88df7d118a5af67c2eff0",
+    "src/spawn.ts": "a72479eb80e2c8bb081373d1ed94f5b074c22bb3de4aa317cfbf0f5786b9c3f6",
+    "src/token.ts": "2aa393ad7f542ee986f2a3a09e0530edafaf7f0eb683a8948bf8b125d0b78e73",
+    "src/win32-abi.ts": "3928cf90ffb48d62d83eed0e9dc7b4d3b8c57ce755d970dcdf8e3af8afc594d3",
+    "src/workspace-sid.ts": "7332eef52a304789921e104b1ca38246ea8b44673ea08e952bc43791a9af6411"
+  }
+}

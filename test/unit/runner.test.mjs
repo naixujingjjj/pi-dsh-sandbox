@@ -147,6 +147,22 @@ test("an npm-hoisted dependency resolves from the plugin before any global looku
 	assert.equal(located.location.version, "0.2.2-rc.5");
 });
 
+test("the vendored backend inside the package wins over node_modules and global roots", () => {
+	const plugin = join(scratch, "plugin-with-vendor");
+	const vendored = join(plugin, "vendor", "dsh-sandbox-windows-acl");
+	const vendoredRunner = join(vendored, "lib", "runner.js");
+	const hoistedRunner = join(plugin, "node_modules", "@deepseek-ai", "dsh-sandbox-windows-acl", "lib", "runner.js");	mkdirSync(resolve(vendoredRunner, ".."), { recursive: true });
+	mkdirSync(resolve(hoistedRunner, ".."), { recursive: true });
+	writeFileSync(vendoredRunner, "// vendored runner\n");
+	writeFileSync(hoistedRunner, "// unpatched node_modules runner\n");
+	writeFileSync(join(vendored, "package.json"), JSON.stringify({ name: ACL_PACKAGE, version: "0.2.2-rc.5+pi-dsh.1" }));
+	const located = locateRunner({ runnerModule: null, dshRoot: null, pluginRoot: plugin,
+		globalRoots: () => { throw new Error("The vendored backend must not consult global DSH"); } });
+	assert.equal(located.location.source, "vendor");
+	assert.equal(located.location.modulePath, vendoredRunner);
+	assert.equal(located.location.version, "0.2.2-rc.5+pi-dsh.1");
+});
+
 test("an installed DSH tree is found under a global root", () => {
 	const globalRoot = join(scratch, "npm-root");
 	const runner = join(

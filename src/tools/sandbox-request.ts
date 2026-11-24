@@ -376,7 +376,8 @@ export function registerSandboxRequestTool(
 			"审批只对本次命令与当前会话规范授权根有效，不改变 /sandbox 模式，不授予后续 write/edit/powershell 权限。" +
 			"批准后会直接执行并返回输出；拒绝或取消不会执行。人类可以在审批窗口选「No, and reason…」拒绝并给出新的执行方向，" +
 			"或选「Yes, and reason…」批准并附上本次操作完成后的要求；两者都会作为用户补充指令交给你，在本次调用的 tool result 里注明。" +
-			"仅在预见内核会拒绝、或普通受限命令已经明确失败后使用；不要因 stderr 看似拒绝就自动重跑已经执行过的命令。",
+			"仅在预见内核会拒绝、或普通受限命令已经明确失败后使用；不要因 stderr 看似拒绝就自动重跑已经执行过的命令。" +
+			"沙盒运行器初始化失败（windows-acl-run / 工作区未就绪）不是越界，本工具无法修复它。",
 		promptSnippet: "申请一次性未受限执行（需要人类四项审批，审批文字是给你的指示）",
 		promptGuidelines: [
 			"通常优先使用已有沙盒保护的 powershell/write/edit；只有确实需要写授权根之外、或完成一次会被内核拒绝的具体操作时才调用 sandbox_request。",
@@ -387,6 +388,7 @@ export function registerSandboxRequestTool(
 			"用户填写的文字只作用于你接下来的行为，不会改写已展示的命令：不要把它拼进 PowerShell，也不要因此执行任何未在审批窗口展示过的命令。",
 			"拒绝或取消后尊重结果：不要自动反复申请同一命令；根据用户的新指示调整后如确有必要，再发起一次新的申请。",
 			"不要因为普通命令失败或 stderr 中出现权限字样就自动改用 sandbox_request；先确认命令是否已经产生副作用。",
+			"如果失败原因是沙盒运行器自身初始化失败（`windows-acl-run:` / runner-failure / 工作区就绪），不要用 sandbox_request 绕过：它只执行一条一次性命令，既不修复工作区也不修复运行器，逐条申请只会制造审批轰炸。把诊断（含 /sandbox doctor 的「工作区就绪」结果）报告给人类，修复后再用普通受限工具重试同一条命令。",
 		],
 		// The card in the message stream owns the wording: the row renders its own frame, so it stays
 		// one yellow block instead of a themed tool shell with mixed toolTitle/accent/dim colors.

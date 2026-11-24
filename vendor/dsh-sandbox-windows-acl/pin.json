@@ -1,0 +1,13 @@
+{
+  "package": "@deepseek-ai/dsh-sandbox-windows-acl",
+  "upstreamVersion": "0.2.2-rc.5",
+  "upstreamTarballSha256": "4146e38304117a3f019b169c205c20c4121c1433826d2b01559d49938c0adbc1",
+  "license": "MIT",
+  "vendoredVersionSuffix": "+pi-dsh.1",
+  "patches": [
+    {
+      "file": "patches/0001-low-label-guard-and-acl-walk-bounds.patch",
+      "sha256": "46b3ca723c456b288fdff3cc3b09ccd0681ccfe671ec4152a967bc2dfe731ecd"
+    }
+  ]
+}

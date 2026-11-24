@@ -1,6 +1,6 @@
 {
 	"name": "pi-dsh-sandbox",
-	"version": "0.4.1",
+	"version": "0.4.2",
 	"description": "Windows write-confinement sandbox for the Pi coding agent: routes shell and file-mutation tools through the DSH Windows ACL restricted-token runner, plus a human-approved one-shot sandbox_request escape.",
 	"type": "module",
 	"license": "MIT",
@@ -20,6 +20,7 @@
 	},
 	"files": [
 		"src",
+		"vendor",
 		"docs/*.md",
 		"README.md",
 		"CONTRIBUTING.md",
@@ -36,14 +37,21 @@
 		"test:cli": "node scripts/smoke-cli.mjs",
 		"test:failure": "node scripts/smoke-failclosed.mjs",
 		"test:pack": "node scripts/check-pack.mjs",
-		"verify": "npm run check:repo && npm run typecheck && npm test",
+		"vendor:build": "node scripts/build-vendor-runner.mjs",
+		"vendor:check": "node scripts/build-vendor-runner.mjs --check",
+		"verify": "npm run check:repo && npm run vendor:check && npm run typecheck && npm test",
 		"check:repo": "node scripts/check-repo.mjs",
 		"pack": "node scripts/package.mjs",
 		"check:package": "node scripts/check-package.mjs",
 		"verify:windows": "npm run verify && npm run test:integration && npm run test:register && npm run test:pi && npm run test:cli && npm run test:failure && npm run test:pack"
 	},
 	"dependencies": {
-		"@deepseek-ai/dsh-sandbox-windows-acl": "0.2.2-rc.5"
+		"@deepseek-ai/dsh-lazy-require": "0.2.2-rc.5",
+		"@deepseek-ai/dsh-skill": "0.2.2-rc.5",
+		"@deepseek-ai/dsh-subprocess": "0.2.2-rc.5",
+		"@deepseek-ai/dsh-win32-process": "0.2.2-rc.5",
+		"koffi": "3.1.1",
+		"yaml": "^2.4.2"
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": ">=1.6.0",

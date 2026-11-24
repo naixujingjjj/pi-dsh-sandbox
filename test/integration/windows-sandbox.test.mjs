@@ -11,6 +11,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -73,10 +74,10 @@ async function waitFor(predicate, timeoutMs = 20_000) {
 	}
 }
 
-test("the runner is located from the plugin's own dependency", { skip }, () => {
-	assert.equal(location.source, "plugin");
-	assert.match(location.modulePath, /dsh-sandbox-windows-acl[\\/]lib[\\/]runner\.js$/);
-	assert.equal(location.version, "0.2.2-rc.5");
+test("the runner is located from the package's vendored backend", { skip }, () => {
+	assert.equal(location.source, "vendor");
+	assert.match(location.modulePath, /vendor[\\/]dsh-sandbox-windows-acl[\\/]lib[\\/]runner\.js$/);
+	assert.match(location.version ?? "", /^0\.2\.2-rc\.5\+pi-dsh\.\d+$/);
 	assert.equal(existsSync(helperPath), true);
 });
 
@@ -355,4 +356,117 @@ test("channels are removed even when a mutation fails", { skip }, async () => {
 	mkdirSync(channel.dir, { recursive: true });
 	disposeMutationChannel(channel);
 	assert.equal(existsSync(channel.dir), false);
+});
+
+/** Run `icacls` and return its combined output plus the exit code. */
+function icacls(path, ...args) {
+	const result = spawnSync("icacls", [path, ...args], { encoding: "utf8", windowsHide: true });
+	return { status: result.status, text: `${result.stdout ?? ""}${result.stderr ?? ""}` };
+}
+
+/** Escape one account name for use inside a RegExp. */
+function escapeRegex(value) {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Regression for the reported fault: a workspace root whose parent grants the running account full
+ * control WITHOUT an inheritance flag, and whose root therefore carries only the inherited
+ * group/capability ACEs. The backend's grant must complete there without any ACL change and still
+ * keep the kernel boundary (inside writes allowed, outside writes and deletes denied).
+ *
+ * This layout needs DACL edits to build, so it runs in a normal terminal (see CONTRIBUTING): the
+ * plugin's own confined shell cannot write security descriptors. Every directory used here lives
+ * under this file's throw-away `%TEMP%` tree.
+ */
+test("a workspace root that only inherits the Low label is granted without an ACL change", { skip }, async () => {
+	const parent = join(base, "acl 父目录");
+	const child = join(parent, "acl 子目录");
+	const childTemp = join(base, "acl temp 根");
+	mkdirSync(parent, { recursive: true });
+	mkdirSync(childTemp, { recursive: true });
+	const account = `${process.env.USERDOMAIN || "."}\\${process.env.USERNAME}`;
+	const accountPattern = new RegExp(escapeRegex(account), "i");
+
+	// The layout has to be CONSTRUCTED, not inherited: every directory under %TEMP% inherits an
+	// account full-control ACE from the user profile, which would grant WRITE_OWNER and mask the very
+	// condition under test. Drop the inherited ACEs, then give the parent exactly what the real parent
+	// directory carries: the account's full control on that folder only (no OI/CI), the ambient
+	// Authenticated-Users Modify the real workspace root inherits, the world ambient-delete deny, and
+	// an inheritable Low label.
+	const strip = icacls(parent, "/inheritance:r");
+	assert.equal(strip.status, 0, strip.text);
+	const grant = icacls(parent, "/grant:r", `${account}:(F)`);
+	assert.equal(grant.status, 0, grant.text);
+	const ambient = icacls(parent, "/grant", "*S-1-5-11:(OI)(CI)(M)");
+	assert.equal(ambient.status, 0, ambient.text);
+	const deny = icacls(parent, "/deny", "*S-1-1-0:(CI)(DC)");
+	assert.equal(deny.status, 0, deny.text);
+	const label = icacls(parent, "/setintegritylevel", "(OI)(CI)L");
+	assert.equal(label.status, 0, label.text);
+	// The temporary deny must be removed even when an assertion below throws, or the throw-away
+	// tree cannot be deleted by the file-level `after` hook.
+	try {
+	mkdirSync(child, { recursive: true });
+
+	const before = icacls(child);
+	assert.equal(before.status, 0, before.text);
+	// The precondition under test: the child did NOT inherit the account's full control.
+	assert.equal(accountPattern.test(before.text), false, `child must not inherit ${account} full control:\n${before.text}`);
+	// ... but it did inherit a Low no-write-up label. `(NW)` and the `OI`/`CI` tokens are the ACE
+	// rights letters icacls prints verbatim in every locale, so this line identifies a mandatory label
+	// ACE that propagates - not a capability SID and not a localized label name.
+	assert.match(before.text, /\(OI\)\(CI\)\(NW\)/i, `child should inherit a no-write-up label ACE:\n${before.text}`);
+	const parentLabels = icacls(parent);
+	assert.match(parentLabels.text, /\(OI\)\(CI\)\(NW\)/i, `parent should carry the label ACE:\n${parentLabels.text}`);
+
+	const probe = await runRunner(
+		{ location, root: child, temp: childTemp, mode: "workspace-write", argv: nodeEval("process.stdout.write('granted')") },
+		{ cwd: child, collectStdout: true },
+	);
+	assert.equal(probe.exitCode, 0, probe.stderrTail);
+	assert.equal(probe.stdout, "granted");
+
+	const after = icacls(child);
+	assert.equal(after.status, 0, after.text);
+	// A capability ACE for THIS workspace SID was added ...
+	assert.match(after.text, /S-1-4-\d+-\d+/);
+	// ... the inherited no-write-up label ACE is unchanged ...
+	assert.match(after.text, /\(OI\)\(CI\)\(NW\)/i);
+	// ... and no WRITE_OWNER/full-control ACE for the account was needed to get there.
+	assert.equal(accountPattern.test(after.text), false, `the grant must not have to add an account ACE:\n${after.text}`);
+
+	// The kernel boundary still holds with this root.
+	const inside = join(child, "inside.txt");
+	const insideWrite = await runRunner(
+		{ location, root: child, temp: childTemp, mode: "workspace-write", argv: nodeEval(`require('node:fs').writeFileSync(${JSON.stringify(inside)}, 'ok')`) },
+		{ cwd: child },
+	);
+	// The confined child runs at Low integrity: this write succeeding also proves the root's
+	// EFFECTIVE mandatory label is Low (a Medium-or-higher label with no-write-up would deny it).
+	assert.equal(insideWrite.exitCode, 0, insideWrite.stderrTail);
+	assert.equal(readFileSync(inside, "utf8"), "ok");
+
+	const outsideTarget = join(outside, "acl-outside.txt");
+	const outsideWrite = await runRunner(
+		{ location, root: child, temp: childTemp, mode: "workspace-write", argv: nodeEval(`require('node:fs').writeFileSync(${JSON.stringify(outsideTarget)}, 'nope')`) },
+		{ cwd: child },
+	);
+	assert.notEqual(outsideWrite.exitCode, 0);
+	assert.equal(existsSync(outsideTarget), false);
+	assert.equal(classify({ exitCode: outsideWrite.exitCode, stderr: outsideWrite.stderrTail }).kind, "denied");
+
+	const victim = join(outside, "acl-victim.txt");
+	writeFileSync(victim, "keep");
+	const outsideDelete = await runRunner(
+		{ location, root: child, temp: childTemp, mode: "workspace-write", argv: nodeEval(`require('node:fs').rmSync(${JSON.stringify(victim)})`) },
+		{ cwd: child },
+	);
+	assert.notEqual(outsideDelete.exitCode, 0);
+	assert.equal(existsSync(victim), true);
+	assert.equal(classify({ exitCode: outsideDelete.exitCode, stderr: outsideDelete.stderrTail }).kind, "denied");
+	} finally {
+		const removed = icacls(parent, "/remove:d", "*S-1-1-0", "/T", "/C", "/Q");
+		if (removed.status !== 0) process.stderr.write(`cleanup: removing the temporary deny failed:\n${removed.text}\n`);
+	}
 });
