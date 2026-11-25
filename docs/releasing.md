@@ -1,10 +1,10 @@
-# 整理源码与发布安装包
+# Preparing the Source and Publishing the Installer Package
 
-上传 GitHub 的是源码目录。运行依赖 `node_modules/`、安装包和本地开发记录不属于源码仓库。
+What gets uploaded to GitHub is the source directory. Runtime dependencies in `node_modules/`, installer packages, and local development records are not part of the source repository.
 
-## 上传源码
+## Uploading the Source
 
-首次创建仓库时，在源码根目录运行：
+When creating the repository for the first time, run the following in the source root:
 
 ```powershell
 git init
@@ -13,45 +13,45 @@ git diff --cached --stat
 git status --short
 ```
 
-确认待提交内容后再提交、添加你自己的 GitHub remote 并推送。项目已提供 `.gitignore`；不要使用 `git add -f` 把依赖、密钥或安装包强行加入仓库。
+Review what is about to be committed before committing; then add your own GitHub remote and push. The project already ships a `.gitignore`; do not use `git add -f` to force dependencies, keys, or installer packages into the repository.
 
-如果通过 GitHub 网页上传，可使用整理好的 `pi-dsh-sandbox-<版本>-source.zip`：先解压，再上传其中源码目录的内容，包括 `.github/`、`.gitignore` 等隐藏文件。不要将本机包含 `node_modules/` 的整个目录直接拖进上传框，也不要只上传 ZIP 文件代替源码。
+If you upload through the GitHub web UI, you can use the prepared `pi-dsh-sandbox-<version>-source.zip`: unpack it first, then upload the contents of the source directory inside it, including hidden files such as `.github/` and `.gitignore`. Do not drag the whole local directory containing `node_modules/` into the upload box, and do not upload only the ZIP file as a substitute for the source.
 
-仓库已提供 Windows GitHub Actions 工作流。首次推送后，在 Actions 中查看检查结果；本地测试通过并不代表远端工作流已经运行。
+The repository already ships a Windows GitHub Actions workflow. After the first push, check the results in Actions; passing local tests does not mean the remote workflow has already run.
 
-## 本地检查与打包
+## Local Checks and Packaging
 
-在普通、未受限的 Windows 终端中执行：
+Run the following in a normal, unrestricted Windows terminal:
 
 ```powershell
 npm ci --include=optional
-npm run vendor:check   # 确认包内 vendored 后端与 PROVENANCE.json 一致
+npm run vendor:check   # confirm the vendored backend in the package matches PROVENANCE.json
 npm run verify:windows
 npm run pack
 npm run check:package
 ```
 
-测试使用临时目录和本地测试模型，不需要真实模型 API。真实内核测试会修改临时测试工作区的 ACL；不要从本插件的受限 shell 中运行整套测试。
+The tests use temporary directories and a local test model, so no real model API is needed. The real kernel tests modify the ACL of the temporary test workspace; do not run the full test suite from this plugin's restricted shell.
 
-`npm run pack` 默认输出到源码目录旁的 `pi-dsh-sandbox-pkg/`，不会把安装包留在源码根目录。也可以指定外部目录：
+`npm run pack` writes to `pi-dsh-sandbox-pkg/` next to the source directory by default, and does not leave the installer package in the source root. You can also specify an external directory:
 
 ```powershell
 npm run pack -- --out-dir D:\releases\pi-dsh-sandbox
 ```
 
-每个版本包含：
+Each version contains:
 
-- `pi-dsh-sandbox-<版本>.tgz`：供 npm 安装的插件包，含 `vendor/dsh-sandbox-windows-acl/`（打好补丁的后端源码、编译产物、上游 `LICENSE`、`pin.json`、`PROVENANCE.json`、`patches/`），**不含** npm 依赖；安装时仍需联网。
-- 同名 `.tgz.sha256`：SHA256 校验值。
-- 同名 `.tgz.manifest.json`：文件清单、版本及校验值。
-- `latest.json`：本地最新版本索引。
+- `pi-dsh-sandbox-<version>.tgz`: the plugin package for installation with npm, containing `vendor/dsh-sandbox-windows-acl/` (the patched backend source, compiled artifacts, the upstream `LICENSE`, `pin.json`, `PROVENANCE.json`, `patches/`), and **not** containing npm dependencies; installation still requires network access.
+- A `.tgz.sha256` file of the same name: the SHA256 checksum.
+- A `.tgz.manifest.json` file of the same name: the file manifest, version, and checksums.
+- `latest.json`: the local index of the latest version.
 
-升级版本后打包时，脚本会把前一版产物移到输出目录的 `archive/`，保留历史文件。
+When packing after a version bump, the script moves the previous version's artifacts into `archive/` in the output directory, preserving the historical files.
 
-如果本次改动了 ACL 后端，先用 `npm run vendor:build` 从 `pin.json` 固定的上游 tarball 重建 `vendor/`（校验上游 SHA-256、应用 `patches/`），再跑 `vendor:check`。不要手工编辑 `vendor/**/lib/`，也不要声称上游发布版已包含该补丁。
+If this change touched the ACL backend, first rebuild `vendor/` from the upstream tarball pinned in `pin.json` with `npm run vendor:build` (verifying the upstream SHA-256 and applying `patches/`), then run `vendor:check`. Do not hand-edit `vendor/**/lib/`, and do not claim that the upstream release already contains that patch.
 
-在 GitHub 建立对应版本的 Release 后，将当前 `.tgz` 与校验文件作为附件上传。源码中没有预填未知的仓库地址，也没有宣称已发布到 npm。
+After creating a Release for the corresponding version on GitHub, upload the current `.tgz` and its checksum file as attachments. The source has no prefilled repository URL for an unknown remote, and it makes no claim of having been published to npm.
 
-## 不上传的本地资料
+## Local Material That Is Not Uploaded
 
-`pi-dsh-sandbox-pkg/archive/` 保存旧安装包；`development-notes/` 保存迁出的研究报告和开发流水记录。这些资料可能包含本机绝对路径和历史探针，不应整目录上传到公开仓库。公开的安装、使用和安全说明均位于源码的 `docs/` 中。
+`pi-dsh-sandbox-pkg/archive/` holds old installer packages; `development-notes/` holds the research reports and development run records that were moved out. This material may contain local absolute paths and historical probes, and it should not be uploaded as whole directories to a public repository. The public installation, usage, and security documentation all lives in the source's `docs/`.

@@ -1,209 +1,209 @@
-# 安全边界
+# Security boundaries
 
-本插件提供的是 **Windows 内核强制的写入限制**，不是完整沙盒、不是容器，也不是“模型不可做坏事”的保证。请在安装前理解下面每一条。
+This plugin provides **Windows kernel-enforced write restrictions**: it is not a complete sandbox, not a container, and not a guarantee that "the model cannot do bad things". Please understand every item below before installing.
 
-## 1. 一句话模型
+## 1. The model in one sentence
 
-- **写入/删除**：受限子进程只能写授权根与运行器私有 temp。
-- **读、网络、进程可见性**：不受限。
-- **失败**：一律 fail-closed，绝不退回未受限执行。
-- **后端的正式标注**：`enforcement: partial`。
+- **Writes/deletes**: a restricted child process can only write to the authorized roots and the runner's private temp.
+- **Reads, network, process visibility**: unrestricted.
+- **Failure**: always fail-closed, never falling back to unrestricted execution.
+- **The backend's formal designation**: `enforcement: partial`.
 
-## 2. 实际机制
+## 2. The actual mechanism
 
-`workspace-write` / `read-only` 下，`powershell`、`bash`、`!` 以及 `write`/`edit` 的实际写操作都通过 DSH 的 `lib/runner.js`：
+Under `workspace-write` / `read-only`, the actual write operations of `powershell`, `bash`, `!`, and `write`/`edit` all go through DSH's `lib/runner.js`:
 
-1. 复制调用者令牌为 `WRITE_RESTRICTED` 受限令牌；
-2. 降为 **Low 完整性**；
-3. 用能力 SID（capability SID）授予的工作区 ACE + 私有 temp ACE 作为唯一写权限来源；
-4. 对 world SID 拒绝 `FILE_DELETE_CHILD`，防止借父目录权限删除；
-5. 当根还不在 Low 完整性时，在同一个 `SetNamedSecurityInfoW` 调用里把目录标为 Low；若根已经通过继承处于 Low no-write-up，则跳过这次标签写入（标签在 SACL 中，写它需要 `WRITE_OWNER`）。
-6. 子进程的 stdio 继承，退出码原样返回；任何 Win32 失败都阻止不受限 spawn。
+1. Duplicate the caller's token into a `WRITE_RESTRICTED` restricted token;
+2. Drop it to **Low integrity**;
+3. Use the workspace ACE granted to a capability SID plus the private temp ACE as the only source of write permission;
+4. Deny `FILE_DELETE_CHILD` to the world SID, preventing deletion by way of parent-directory permissions;
+5. When the root is not yet at Low integrity, mark the directory Low in the same `SetNamedSecurityInfoW` call; if the root is already at Low no-write-up through inheritance, skip this label write (the label lives in the SACL, and writing it requires `WRITE_OWNER`).
+6. The child process's stdio is inherited and its exit code is returned as-is; any Win32 failure prevents the unrestricted spawn.
 
-因此，普通命令拒绝写入时，是**内核拒绝**；插件侧的包含判定只用于提前给出更清楚的报错。
+So when an ordinary command is refused a write, it is **the kernel refusing**; the plugin-side containment check only exists to produce a clearer error up front.
 
-## 3. 覆盖范围
+## 3. Coverage
 
-| 对象 | 是否受本插件约束 |
+| Object | Constrained by this plugin |
 | --- | --- |
-| `powershell`、`bash`、`!`/`!!` | 是（confined 模式） |
-| `write`、`edit` 的实际 `mkdir`/写文件 | 是（受限 helper） |
-| `read`/`ls`/`grep`/`find` 与 `edit` 的读取部分 | **否**（Pi 进程内） |
-| MCP 工具（web search/fetch、数据库等） | **否** |
-| 第三方扩展、插件直接调用的 `pi.exec` / 文件 API | **否** |
-| 整个 Pi 宿主、子代理运行时 | **不承诺** |
+| `powershell`, `bash`, `!`/`!!` | Yes (confined mode) |
+| The actual `mkdir`/file writes of `write`, `edit` | Yes (restricted helper) |
+| `read`/`ls`/`grep`/`find` and the reading part of `edit` | **No** (inside the Pi process) |
+| MCP tools (web search/fetch, databases, etc.) | **No** |
+| Third-party extensions, `pi.exec` / file APIs called directly by plugins | **No** |
+| The entire Pi host, sub-agent runtimes | **Not promised** |
 
-插件只**同名覆盖** `powershell`、`bash`、`write`、`edit`，并注册 `/sandbox`、`sandbox_request` 和四个 CLI 参数。它不会把整个宿主装进沙盒；其它扩展和 MCP 仍按它们自己的权限运行。
+The plugin only **overrides tools of the same name** — `powershell`, `bash`, `write`, `edit` — and registers `/sandbox`, `sandbox_request`, and four CLI parameters. It does not put the whole host into a sandbox; other extensions and MCP still run with their own permissions.
 
-### 3.1 子代理
+### 3.1 Sub-agents
 
-是否加载本插件取决于宿主如何为子代理装配扩展与工具，本仓库不把子代理视为额外的信任边界。
+Whether this plugin is loaded depends on how the host assembles extensions and tools for sub-agents; this repository does not treat sub-agents as an additional trust boundary.
 
-可以确认的行为是：没有可确认 UI 时，`sandbox_request` 返回 `no-ui` 并**不执行**，提示由上层代理或用户在交互式终端发起。子代理不能代替人类批准，也不会因为“在子代理里”而获得更宽的模式。
+What can be confirmed is: when there is no confirmable UI, `sandbox_request` returns `no-ui` and does **not execute**, and suggests that the upper-level agent or the user initiate it from an interactive terminal. A sub-agent cannot approve on a human's behalf, and does not get a wider mode merely because it is "inside a sub-agent".
 
-## 4. 读与网络
+## 4. Reads and the network
 
-- **读不受限**：受限子进程可读你有权读的任何文件，包括其它工作区、`~/.ssh`、浏览器配置等。`read`/`grep` 等本来就在 Pi 进程内，连受限令牌都不经过。
-- **网络不受限**：受限子进程可任意联网；MCP web 工具完全不经过本插件。
-- 需要读侧隔离或网络限制时，应配合 AppContainer、防火墙、独立用户/虚拟机等其它机制；本插件不提供这些能力。
+- **Reads are unrestricted**: a restricted child process can read any file you have permission to read, including other workspaces, `~/.ssh`, browser profiles, and so on. `read`/`grep` etc. live inside the Pi process anyway and do not even go through the restricted token.
+- **The network is unrestricted**: a restricted child process can access the network arbitrarily; MCP web tools do not go through this plugin at all.
+- When you need read-side isolation or network restrictions, pair this with other mechanisms such as AppContainer, firewalls, or a separate user/virtual machine; this plugin does not provide those capabilities.
 
-## 5. 硬链接例外
+## 5. The hard-link exception
 
-硬链接是**文件对象别名**，不是路径别名：
+A hard link is a **file object alias**, not a path alias:
 
-- 工作区授权会传播到那个底层文件的安全描述符；
-- 同一个文件如果在根外还有一个硬链接，通过该别名仍然可写；
-- 拒绝工作区中的所有多链接文件不可行（普通 pnpm 安装就使用硬链接）。
+- A workspace authorization propagates to that underlying file's security descriptor;
+- If the same file also has a hard link outside the root, it is still writable through that alias;
+- Refusing all multi-link files inside a workspace is infeasible (an ordinary pnpm install already uses hard links).
 
-这是机制固有边界，不是配置错误。不要把“根外硬链接”当成被隔离。
+This is an inherent boundary of the mechanism, not a configuration error. Do not treat a "hard link outside the root" as isolated.
 
-## 6. 常驻副作用（最重要的代价）
+## 6. Persistent side effects (the most important cost)
 
-`workspace-write` 第一次授权时会在**授权根**上留下改动：
+The first authorization of `workspace-write` leaves changes on the **authorized root**:
 
-1. 一条**能力 SID 允许 ACE**：SID 由规范根路径确定性派生（`S-1-4-<hash>`），每个工作区每台机器一次；
-2. 一条对 **world/Everyone 的 `FILE_DELETE_CHILD` 拒绝**（仅容器继承），防止借父目录删除；
-3. 当根还不在 Low 完整性时，把它标为 **Low 完整性**，带禁止向上写（no-write-up）策略；根已通过继承具备该标签时不重复写。
+1. A **capability-SID allow ACE**: the SID is deterministically derived from the canonical root path (`S-1-4-<hash>`), one per workspace per machine;
+2. A `FILE_DELETE_CHILD` **deny** for the **world/Everyone** (container inheritance only), preventing deletion by way of the parent directory;
+3. When the root is not yet at Low integrity, mark it **Low integrity** with a no-write-up policy; when the root already carries that label through inheritance, do not write the label again.
 
-标签只在需要时写：如果根**已经**通过继承处于 Low no-write-up（父目录带了可继承的 Low 标签），
-后端只做 DACL 改动。写标签属于 SACL，需要 `WRITE_OWNER`；只改 DACL 只需 `WRITE_DAC`（所有者隐含具备）。
-这一区别有安全意义：跳过的是“写一个已经生效、与现有继承标签完全相同的标签”，从不把任何目录降到更低，
-也不会让本该拒绝的写变得可写；若继承标签后来被父目录改掉，沙盒会以写失败（fail-closed）告终。
+The label is written only when needed: if the root is **already** at Low no-write-up through inheritance (the parent directory carries an inheritable Low label),
+the backend makes only the DACL changes. Writing the label is a SACL operation and requires `WRITE_OWNER`; changing only the DACL requires only `WRITE_DAC` (which the owner implicitly has).
+This distinction has security significance: what is skipped is "writing a label that is already in effect and exactly identical to the existing inherited label"; it never lowers any directory to a lower level,
+and never makes a write that should be refused become writable; if the inherited label is later changed by the parent directory, the sandbox ends in a write failure (fail-closed).
 
-**“不需要额外修复权限”不等于“完全不改 ACL”**：正常授权仍会写第 1、2 项（能力 SID 允许 ACE 与
-Everyone 删除子项拒绝 ACE），那属于沙盒授权本身；不需要的是为脚本补 `WRITE_OWNER`/`(WO)` 这类额外修复权限。
+**"No extra permission repair is needed" does not mean "the ACL is not modified at all"**: a normal authorization still writes items 1 and 2 (the capability-SID allow ACE and
+the Everyone deny-delete-child ACE), which belong to the sandbox authorization itself; what is not needed is extra repair permissions such as `WRITE_OWNER`/`(WO)` for the script.
 
-这些改动：
+These changes:
 
-- **不会**随会话结束、`/reload`、插件卸载或 Pi 退出而撤销；
-- 是跨会话的复用缓存：第二次进入同一工作区会命中已有 ACE/标签并跳过重新传播；
-- 首次传播是**整棵树**的急切传播，大目录可能耗时数十秒；
-- 会让根内的目录拒绝以 `GENERIC_ALL`/FullControl 方式打开（`FILE_DELETE_CHILD` 的副作用）；普通读写、`MAXIMUM_ALLOWED` 和基于 `DELETE` 的删除不受影响。
+- **Are not** reverted when the session ends, on `/reload`, on plugin unload, or when Pi exits;
+- Are a cross-session reuse cache: entering the same workspace a second time hits the existing ACE/label and skips re-propagation;
+- The first propagation is an eager propagation of the **whole tree**, which may take tens of seconds on large directories;
+- Make directories inside the root refuse to be opened with `GENERIC_ALL`/FullControl (a side effect of `FILE_DELETE_CHILD`); ordinary reads and writes, `MAXIMUM_ALLOWED`, and `DELETE`-based deletion are unaffected.
 
-### 6.1 Low 标签的连带影响
+### 6.1 Knock-on effects of the Low label
 
-Low 标签会**放宽**该目录树对其它 Low 完整性进程的可写性：别的产品的 Low-IL 沙盒、受保护模式阅读器，只要以同一用户运行在 Low，就可能写入/删除这个目录。Medium 标签下它们会被拒绝。
+The Low label **loosens** the writability of that directory tree for other Low integrity processes: another product's Low-IL sandbox, a protected-mode reader — as long as they run as the same user at Low, they may be able to write to/delete this directory. Under a Medium label they would be refused.
 
-这是写入边界的前提：没有 Low 标签，受限子进程根本无法写入；按会话撤销标签会导致每次都要重新传播整棵树。
+This is a precondition of the write boundary: without the Low label, the restricted child process could not write at all; revoking the label per session would mean re-propagating the whole tree every time.
 
-### 6.2 临时授权
+### 6.2 Temporary authorization
 
-私有 temp 的能力 SID 是随机、按调用创建的，运行器退出时会撤销；工作区授权则是常驻的。临时目录删除后，相关拒绝项会随目录消失；手工 `icacls` 无法回收未映射的能力 SID（会报 `ERROR_NONE_MAPPED (1332)`）。
+The capability SID for the private temp is random and created per invocation, and is revoked when the runner exits; the workspace authorization, by contrast, is persistent. After the temporary directory is deleted, the related deny entries disappear along with the directory; a manual `icacls` cannot reclaim an unmapped capability SID (it reports `ERROR_NONE_MAPPED (1332)`).
 
-## 7. 回滚与恢复
+## 7. Rollback and recovery
 
-只能**精确恢复你实际备份过的状态**。没有“一键恢复到出厂 ACL”的安全方法。
+You can only **restore exactly the state you actually backed up**. There is no safe way to "restore the factory ACL with one click".
 
-### 推荐：使用可丢弃的工作区
+### Recommended: use a disposable workspace
 
-如果这个目录只是临时副本、生成产物或可重新 clone 的检出，**用完直接丢弃整个副本**。这是最可靠的回滚：安全描述符随对象一起消失。
+If this directory is only a temporary copy, generated output, or a checkout that can be cloned again, **just discard the whole copy when you are done**. This is the most reliable rollback: the security descriptor disappears along with the object.
 
-### 需要保留内容：先备份 DACL
+### If you need to keep the contents: back up the DACL first
 
-在**首次使用沙盒之前**备份 DACL。用 PowerShell 的 `Get-Acl` 只取 **Access（DACL）** 一节，恢复时同样只写这一节；
-owner/group/SACL（完整性标签）都不参与，因此不会把 Low 标签改掉。
+Back up the DACL **before using the sandbox for the first time**. With PowerShell's `Get-Acl`, take only the **Access (DACL)** section, and when restoring, write only that section as well;
+owner/group/SACL (the integrity label) do not participate, so the Low label will not be changed.
 
 ```powershell
 $root   = 'D:\work\demo'
-$backup = Join-Path $env:TEMP 'demo-dacl.sddl'   # 记下这个真实路径
+$backup = Join-Path $env:TEMP 'demo-dacl.sddl'   # note down this real path
 $access = [System.Security.AccessControl.AccessControlSections]::Access
 
-# 备份（只存 DACL）
+# Back up (stores only the DACL)
 (Get-Acl -LiteralPath $root).GetSecurityDescriptorSddlForm($access) | Set-Content -LiteralPath $backup
 
-# …确认发生了沙盒授权…
+# …confirm that a sandbox authorization has happened…
 
-# 恢复（只替换 DACL）
+# Restore (replaces only the DACL)
 $acl = [System.Security.AccessControl.DirectorySecurity]::new()
 $acl.SetSecurityDescriptorSddlForm((Get-Content -LiteralPath $backup -Raw).Trim(), $access)
 Set-Acl -LiteralPath $root -AclObject $acl
 ```
 
-在隔离的同名目录（父目录 + `pi-dsh-sandbox` 子目录，带可继承 Low 标签）中实测：
-添加 Everyone 删除子项拒绝 ACE 与一条显式允许 ACE 后，用上面代码恢复得到**与原 DACL 完全相同的 SDDL**，
-owner/group 与完整性标签均不变。
+Measured in an isolated directory of the same name (a parent directory + a `pi-dsh-sandbox` subdirectory, carrying an inheritable Low label):
+after adding the Everyone deny-delete-child ACE and one explicit allow ACE, restoring with the code above yields **an SDDL exactly identical to the original DACL**,
+with owner/group and the integrity label unchanged.
 
-限制与注意事项：
+Limitations and caveats:
 
-- 上述代码只读写 **DACL**。Low 标签（SACL）不会被备份或还原；恢复后仍是原标签。
-- **不要用 `icacls /restore` 作为 DACL 回滚**：实测非管理员下可能 `Successfully processed 0 files` 并报 1300，
-  且 `icacls /save` 的备份文件带 SACL 段，回写需要额外特权（会把标签一起动）；`icacls /save` 也不能当纯 DACL 备份。
-- 当前插件没有“自动撤销 Low 标签/能力 ACE”的功能。
-- 恢复要按条目精确进行；不要把所有对象统一改成 Medium 来代替原始标签——那只是换了一种错误状态。
-- 如果后端在**写 Low 标签**时返回 `ERROR_ACCESS_DENIED` 并明确点名 `WRITE_OWNER`，修复步骤（包括可回滚的最小 `(WO)` ACE）
-  在 [troubleshooting 的「工作区根无法授权」](troubleshooting.md#工作区根无法授权grantwrite-win32-5) 一节；那属于修工作区，不是扩充沙盒权限。
-  普通的 `SetNamedSecurityInfoW` Win32 5 **不**足以断定是缺 `WRITE_OWNER`：也可能是 DACL 写权限、受保护描述符、
-  所有者/组/SACL 写入被拒。先做只读检查，再决定是否修改 ACL；插件不会自动改。
+- The code above reads and writes **only the DACL**. The Low label (SACL) is neither backed up nor restored; after restoration it is still the original label.
+- **Do not use `icacls /restore` as a DACL rollback**: measured as a non-administrator, it may print `Successfully processed 0 files` and report 1300,
+  and a backup file from `icacls /save` carries a SACL section whose write-back requires additional privileges (it would touch the label as well); `icacls /save` also cannot serve as a pure DACL backup.
+- The current plugin has no feature to "automatically revoke the Low label/capability ACE".
+- Restoration must be done precisely, entry by entry; do not uniformly change all objects to Medium in place of the original label — that is merely a different wrong state.
+- If the backend returns `ERROR_ACCESS_DENIED` while **writing the Low label** and explicitly names `WRITE_OWNER`, the repair steps (including a minimal, rollback-safe `(WO)` ACE)
+  are in the [troubleshooting "Workspace root cannot be authorized"](troubleshooting.md#workspace-root-cannot-be-authorized-grantwrite-win32-5) section; that belongs to repairing the workspace, not to expanding the sandbox's permissions.
+  An ordinary `SetNamedSecurityInfoW` Win32 5 is **not** enough to conclude that `WRITE_OWNER` is missing: it could also be DACL write permission, a protected descriptor,
+  or owner/group/SACL writes being denied. Do read-only checks first, then decide whether to modify the ACL; the plugin will not modify it automatically.
 
-### 绝对不要做
+### Never do this
 
-- ❌ `icacls <根> /reset /T`：会抹掉你在该目录树上原有的自定义 ACL，只重建继承来的默认项，属于不可逆破坏。
-- ❌ 手工 `icacls /remove` 能力 SID：未映射 SID 会报 `ERROR_NONE_MAPPED (1332)`，并不能安全还原。
-- ❌ 为了“卸载干净”而删除需要保留的真实项目。卸载插件不会撤销副作用；删除项目只会丢失你的数据。
-- ❌ 把整个用户目录、`C:\`、仓库根之上很大的目录当作工作区来“试一下”。首次传播和 Low 标签会影响整棵树。
+- ❌ `icacls <root> /reset /T`: this wipes the custom ACLs you already had on that directory tree and rebuilds only the inherited default entries; it is irreversible damage.
+- ❌ Manually `icacls /remove` the capability SID: an unmapped SID reports `ERROR_NONE_MAPPED (1332)`, and this cannot safely restore anything.
+- ❌ Delete a real project you need to keep just to "uninstall cleanly". Uninstalling the plugin does not revert the side effects; deleting the project only loses your data.
+- ❌ Treat your whole user directory, `C:\`, or a directory far above the repository root as a workspace just to "give it a try". The first propagation and the Low label affect the whole tree.
 
-## 8. 一次性 off 执行（`sandbox_request` / `/sandbox exec`）
+## 8. One-off off execution (`sandbox_request` / `/sandbox exec`)
 
-批准后执行的那条命令**不经过沙盒**。它可以修改当前用户有权访问的任意文件，包括根外文件、用户配置、其它项目。审批只保护：
+The single command executed after approval **does not go through the sandbox**. It can modify any file the current user has permission to access, including files outside the root, user configuration, and other projects. Approval protects only:
 
-- **这一条**精确命令（屏幕展示的原文）；
-- **这一个**固定 cwd（当前会话规范根）；
-- **这一次**执行。
+- **this one** exact command (the literal text shown on screen);
+- **this one** fixed cwd (the current session's canonical root);
+- **this one** execution.
 
-它**不**：
+It does **not**:
 
-- 改变 `state.mode`；
-- 设置“全局已批准”标志；
-- 给后续 `write`/`edit`/`powershell` 任何授权；
-- 让审批文字变成持久权限或后续命令的一部分。
+- change `state.mode`;
+- set a "globally approved" flag;
+- grant any authorization to subsequent `write`/`edit`/`powershell`;
+- turn the approval text into a persistent permission or part of subsequent commands.
 
-审批文字是给代理的任务指示：`No, and reason…` 让代理换方向继续（被拒命令不执行）；`Yes, and reason…` 要求代理在操作结束后先报事实、再完成补充要求。它不是“允许更多操作”的授权。
+The approval text is a task instruction for the agent: `No, and reason…` tells the agent to continue in a different direction (the rejected command is not executed); `Yes, and reason…` requires the agent to first report the facts after the operation, then fulfill the additional requirement. It is not an authorization to "allow more operations".
 
-批准后的执行**不受** ACL/Low 约束：模型工具 `sandbox_request` 使用 Pi 的本地 PowerShell operations（`createLocalPowerShellOperations`）执行；人工 `/sandbox exec` 使用 `pi.exec`。两条路径都不经过受限运行器。拒绝、取消、无 UI、空白理由、晚到的批准、会话/根/模式变化都会让它不执行。
+Execution after approval is **not** subject to ACL/Low constraints: the model tool `sandbox_request` executes using Pi's local PowerShell operations (`createLocalPowerShellOperations`); a manual `/sandbox exec` uses `pi.exec`. Neither path goes through the restricted runner. Rejection, cancellation, no UI, an empty reason, a late-arriving approval, and a change of session/root/mode all keep it from executing.
 
-## 9. Fail-closed 清单
+## 9. Fail-closed checklist
 
-以下情况一律**不执行**，也不会退回未受限路径：
+In the following situations the command is always **not executed**, and there is no fallback to an unrestricted path:
 
-- 平台不是 Windows；
-- 找不到 runner，或显式配置的 `runnerModule`/`dshRoot` 无效；
-- 配置不可解析、模式非法、出现不支持的额外可写根；
-- temp 根不可创建或位于工作区内；
-- helper 缺失、没有返回结果协议、runner 打印 `windows-acl-run:`（包括“工作区就绪”类初始化失败）；
-- `read-only` 下的任何 `write`/`edit`；
-- 审批 UI 不可用、审批被取消、理由为空、批准在 signal 取消后到达。
+- the platform is not Windows;
+- the runner cannot be found, or the explicitly configured `runnerModule`/`dshRoot` is invalid;
+- the configuration cannot be parsed, the mode is invalid, or an unsupported additional writable root is present;
+- the temp root cannot be created or lies inside the workspace;
+- the helper is missing, does not return the result protocol, or the runner prints `windows-acl-run:` (including "workspace ready" style initialization failures);
+- any `write`/`edit` under `read-only`;
+- the approval UI is unavailable, the approval is cancelled, the reason is empty, or the approval arrives after the signal is cancelled.
 
-运行器初始化失败与命令被内核拒绝是两件事：前者命令没执行，不能被 `sandbox_request` “绕过”（它只跑一条一次性命令，
-不修工作区也不修运行器）；后者是内核真的拒绝了越界写，才可能属于一次性审批的场景。
+Runner initialization failure and a command being refused by the kernel are two different things: in the former the command was not executed, and it cannot be "bypassed" by `sandbox_request` (which only runs one one-off command,
+and neither repairs the workspace nor the runner); in the latter the kernel really refused an out-of-bounds write, which is when a one-off approval may be the applicable scenario.
 
-宁可报错，也不静默直通。`off` 只能由人类显式选择（配置、CLI 或确认后的 `/sandbox mode off`）。
+Better to error out than to pass through silently. `off` can only be chosen explicitly by a human (configuration, CLI, or `/sandbox mode off` after confirmation).
 
-## 10. 管道与 PowerShell 语言模式
+## 10. Pipes and the PowerShell language mode
 
-- **管道 stdio 的 `EPERM`**：受限子进程无法为新建的命名管道打开写端，因此 `spawn(..., { stdio: "pipe" })` 在受限进程中会 `EPERM`。本插件的 `write`/`edit` 用**继承 stdio + 请求文件**规避；Node 测试运行器的默认子进程隔离模式、Pi 内置本地 PowerShell 后端等仍可能触发。
-- **`read-only` 下的 ConstrainedLanguage**：后端在只读模式无法创建 AppLocker 探测文件，PowerShell 会保守地进入 `ConstrainedLanguage`；`Add-Type`、非核心 .NET 静态调用、COM、反射会失败。这是后端/PowerShell 启动行为，不是 ACL 写边界的一部分。日常使用 `workspace-write`。
+- **`EPERM` on piped stdio**: a restricted child process cannot open the write end of a newly created named pipe, so `spawn(..., { stdio: "pipe" })` yields `EPERM` in a restricted process. This plugin's `write`/`edit` avoid this with **inherited stdio + a request file**; Node test runners' default child-process isolation mode, Pi's built-in local PowerShell backend, and others may still trigger it.
+- **ConstrainedLanguage under `read-only`**: in read-only mode the backend cannot create the AppLocker probe file, so PowerShell conservatively enters `ConstrainedLanguage`; `Add-Type`, non-core .NET static calls, COM, and reflection fail. This is backend/PowerShell startup behavior, not part of the ACL write boundary. For daily use, use `workspace-write`.
 
-## 11. 提示注入与审批 UI
+## 11. Prompt injection and the approval UI
 
-- 审批卡片会剥掉 ANSI 转义与控制字符、展开制表符、把多行显示为多行；**执行仍使用原始字符串**。这能防止命令文本伪造界面，但不能防止模型被恶意内容诱导去申请一条危险命令。
-- 读与网络不受限，模型可能读取到不可信内容并据此发起申请；**人类必须自己阅读卡片上的完整命令、cwd 与理由**，不要只看“看起来像批准”的标题。
-- 黄色高亮、`F2` 回看、四项选择都只是让审批更可读，**不是**对提示注入的全面防护。不要在没有阅读的情况下按 `Yes`。
-- 审批文字会进入会话记录；不要在其中填写密码/令牌。
+- The approval card strips ANSI escapes and control characters, expands tabs, and renders multi-line text as multiple lines; **execution still uses the raw string**. This prevents command text from forging the interface, but does not prevent the model from being induced by malicious content into requesting a dangerous command.
+- Reads and the network are unrestricted, so the model may read untrusted content and request based on it; **the human must personally read the complete command, cwd, and reason on the card**; do not look only at a title that "looks like approval".
+- The yellow highlight, `F2` review, and the four choices only make approval more readable; they are **not** comprehensive protection against prompt injection. Do not press `Yes` without reading.
+- The approval text enters the session record; do not put passwords/tokens in it.
 
-## 12. 审计记录
+## 12. Audit records
 
-插件用会话条目记录审批：
+The plugin records approvals as session entries:
 
-- `requestId`、`toolCallId`、时间、cwd、模式、状态；
-- 命令与申请理由的 **SHA-256 hash**；
-- 人类填写的审批文字与 `reasonSource`。
+- `requestId`, `toolCallId`, time, cwd, mode, status;
+- a **SHA-256 hash** of the command and of the request reason;
+- the approval text entered by the human and `reasonSource`.
 
-它**不**记录命令输出或文件内容。批准后的审计写入失败会在执行前失败；执行后的审计写入失败会如实说明“命令已执行”。
+It does **not** record command output or file contents. An audit write after approval that fails will fail before execution; an audit write after execution that fails truthfully states "the command has already been executed".
 
-## 13. 建议的部署方式
+## 13. Recommended deployment
 
-- 把沙盒工作区设为**项目检出**或一次性副本，而不是整个用户目录。
-- 不要把长期机密（私钥、令牌、生产配置）放在 Low 标签的目录树里；读本来就不受限，Low 标签还会放宽其它 Low 进程的写入。
-- 首次在大目录使用前先备份 DACL 或确认该目录可丢弃。
-- 安装/更新后先跑 `/sandbox doctor`，不要默认关沙盒来“排除故障”。
-- 需要读隔离、网络隔离或多用户隔离时，选择真正的容器/虚拟机/独立账户方案；本插件只负责写入边界。
+- Set the sandbox workspace to a **project checkout** or a one-off copy, not your whole user directory.
+- Do not put long-lived secrets (private keys, tokens, production configuration) in a directory tree carrying the Low label; reads are unrestricted anyway, and the Low label also loosens writes by other Low processes.
+- Back up the DACL before using a large directory for the first time, or confirm that the directory can be discarded.
+- After installing/updating, run `/sandbox doctor` first; do not disable the sandbox by default as a way to "troubleshoot".
+- When you need read isolation, network isolation, or multi-user isolation, choose a real container/virtual machine/separate-account solution; this plugin is only responsible for the write boundary.

@@ -1,71 +1,77 @@
-# 更新记录
+# Changelog
+
+## Unreleased
+
+- The documentation is now English-only: the `README.md`, every file under `docs/`, and `CONTRIBUTING.md`, `CHANGELOG.md` and `THIRD_PARTY_NOTICES.md`.
+- Installation is documented for the GitHub source (`pi -e git:github.com/naixujingjjj/pi-dsh-sandbox`, `pi install git:github.com/naixujingjjj/pi-dsh-sandbox`) as the recommended route, and no instruction assumes a particular local directory any more: the source-directory and `.tgz` routes use `$repo` / `$env:USERPROFILE` and `$env:LOCALAPPDATA` placeholders instead.
+- `docs/installation.md` now covers three sources (GitHub, source directory, `.tgz`) and its sections were renumbered accordingly.
 
 ## 0.4.2
 
-- 修复「工作区根无法授权导致沙盒初始化失败」（`SetNamedSecurityInfoW failed (Win32 5): grantWrite(<工作区根>)`）的诊断与处置：这属于插件在真实目录上初始化失败，不是命令越界。
-- **交付改为包内内置（vendored）的打补丁后端** `vendor/dsh-sandbox-windows-acl/`：以 npm 发布版 `0.2.2-rc.5` 的 `src/` 为基础，应用仓库内 `patches/` 后用 TypeScript 编译；带上游 `LICENSE`、`pin.json`（tarball SHA-256 与补丁哈希）和 `PROVENANCE.json`（每个产物哈希）。resolver 依次为显式配置 > 包内 `vendor/` > 插件 `node_modules` > 全局 DSH。交付不再依赖手工改 `node_modules`（`npm ci`/`npm pack`/重装都会覆盖它），也不以上游发布为前提。上游 `0.2.2-rc.5` 发布版**没有**该修复，本版不声称已发布上游。
-- 后端行为：工作区根已经通过**继承**处于 Low no-write-up 时，不再重复写完整性标签（写标签需要 `WRITE_OWNER`；子目录通常只有所有者隐含的 `WRITE_DAC`），只改 DACL 即可完成授权。**正常授权仍会写能力 SID 允许 ACE 与 Everyone 删除子项拒绝 ACE**：这是“不需要额外修复权限/不需要重写现有 Low 标签”，不是“完全不改 ACL”。
-- 加固继承标签的 native 解析：ACE 头必须落在 `AclSize` 内，内联 SID 的 `SubAuthorityCount`/长度必须与 `AceSize` 一致才做 `sameSidAt`，且必须遍历完整条 ACL 才接受——前面命中的标签不再掩盖后续损坏，畸形 ACL 不越界读、直接回退为写标签（fail-closed）。
-- 后端在**写标签**被 `ERROR_ACCESS_DENIED` 拒绝时，错误详情点名 `WRITE_OWNER`；只改 DACL 的路径保留普通详情。`readiness` 只在错误行含此后端标记时断言该成因，其它 Win32 5 一律列为可能原因（DACL 写权限、受保护描述符、owner/group/SACL、策略），并给出只读检查，不自动改 ACL。
-- `readiness` 修正：带括号的合法路径（先用配置根锚定，再平衡括号扫描）、运行器**私有 temp 子目录**（`call-*/dsh-*`，按“等于或位于 temp 根内”判定）。
-- `powershell`/`bash` 的 runner-failure 说明继续区分「运行器/工作区未就绪」与「命令被内核拒绝」，并明确这类初始化失败**不能**用 `sandbox_request` 绕过；同一会话内首次出现时弹一条 error 通知给人类。
-- `/sandbox doctor` 的「工作区就绪（真实根）」保留；`sandbox_request` 描述与 guidelines 保留防审批轰炸规则。四个审批选项、reason 语义、黄色卡片与语言规则均不变。
-- 测试与验证：新增 vendored 后端单元测试（继承标签只改 DACL、畸形 ACE 边界、早命中不掩盖后续损坏）；Windows 集成测试的父子目录 ACL 布局把临时 deny 清理放进 `t.after`，失败时也能清理；`npm run check:pack` 从 tarball 干净安装后**从安装后的插件解析包内 runner**，校验 `PROVENANCE.json`，并在隔离父子 ACL 布局实际运行（授权成功、标签不变、根外仍拒写）。
-- 文档修正：DACL 备份/恢复改用 PowerShell `Get-Acl`/`Set-Acl` 的 **Access（DACL）** 一节（隔离同名目录实测：还原后 SDDL 与原 DACL 完全一致，owner/group 与 Low 标签不变）；不再推荐 `icacls /save`/`/restore`（实测非管理员下 `/restore` 处理 0 个文件并报 1300，且 `/save` 备份带 SACL 段）；补充 vendored 来源/许可/重建说明，并更正“完全不改 ACL”的说法。
+- Fixed the diagnosis and remediation of "the workspace root cannot be granted, so sandbox initialization fails" (`SetNamedSecurityInfoW failed (Win32 5): grantWrite(<workspace root>)`): this is a plugin initialization failure on a real directory, not a command crossing the sandbox boundary.
+- **Delivery switched to a package-internal (vendored) patched backend** `vendor/dsh-sandbox-windows-acl/`: based on the `src/` of the npm release `0.2.2-rc.5`, applying the in-repo `patches/` and then compiling with TypeScript; ships the upstream `LICENSE`, `pin.json` (tarball SHA-256 and patch hashes) and `PROVENANCE.json` (hash of every artifact). The resolver order is explicit configuration > in-package `vendor/` > plugin `node_modules` > global DSH. Delivery no longer depends on hand-editing `node_modules` (which `npm ci`/`npm pack`/a reinstall will overwrite), nor on an upstream release. The upstream `0.2.2-rc.5` release does **not** contain this fix, and this version does not claim any upstream release.
+- Backend behavior: when the workspace root is already Low no-write-up through **inheritance**, the integrity label is no longer written again (writing a label requires `WRITE_OWNER`; subdirectories usually only have the owner-implied `WRITE_DAC`), and changing only the DACL completes the grant. **Normal granting still writes the capability SID allow ACE and the Everyone deny-delete-child ACE**: this means "no extra privilege repair and no rewrite of the existing Low label are needed", not "the ACL is left completely unchanged".
+- Hardened the native parsing of inherited labels: an ACE header must fall inside `AclSize`, the inline SID's `SubAuthorityCount`/length must agree with `AceSize` before `sameSidAt` is performed, and the entire ACL must be traversed before the result is accepted — an earlier hit no longer masks later corruption, malformed ACLs cause no out-of-bounds read and fall back directly to writing the label (fail-closed).
+- When a **label write** by the backend is rejected with `ERROR_ACCESS_DENIED`, the error detail names `WRITE_OWNER`; the DACL-only path keeps the ordinary detail. `readiness` asserts that cause only when the error line carries this backend marker; every other Win32 5 is listed as a possible cause (DACL write permission, protected descriptor, owner/group/SACL, policy) together with read-only checks, and no ACL is changed automatically.
+- `readiness` fixes: bracketed legal paths (anchor on the configured root first, then a balanced-bracket scan), and the runner's **private temp subdirectory** (`call-*/dsh-*`, judged as "equal to or inside the temp root").
+- The runner-failure explanations of `powershell`/`bash` continue to distinguish "runner/workspace not ready" from "command rejected by the kernel", and state clearly that such initialization failures **cannot** be bypassed with `sandbox_request`; the first occurrence within a session raises one error notification to the human.
+- `/sandbox doctor`'s "workspace ready (real root)" is retained; the `sandbox_request` description and guidelines retain the anti-approval-bombing rule. The four approval options, the reason semantics, the yellow card and the language rules are all unchanged.
+- Tests and verification: added unit tests for the vendored backend (inherited label changes only the DACL, malformed ACE boundaries, an early hit does not mask later corruption); the parent/child directory ACL layout of the Windows integration test moves temporary deny cleanup into `t.after`, so cleanup also happens on failure; `npm run check:pack` performs a clean install from the tarball and then **resolves the in-package runner from the installed plugin**, validates `PROVENANCE.json`, and actually runs it in an isolated parent/child ACL layout (grant succeeds, labels unchanged, writes outside the root are still refused).
+- Documentation fixes: DACL backup/restore now uses the **Access (DACL)** section of PowerShell `Get-Acl`/`Set-Acl` (verified in an isolated directory with the same name: after restore the SDDL is exactly identical to the original DACL, and owner/group and the Low label are unchanged); `icacls /save`/`/restore` are no longer recommended (measured: as a non-administrator `/restore` processes 0 files and reports 1300, and `/save` backups carry a SACL section); added the vendored origin/license/rebuild notes, and corrected the statement that "the ACL is left completely unchanged".
 
 ## 0.4.1
 
-- 简化审批语言规则：用户提示词只要出现中文就用中文，中英混合中文优先；无中文且含英文字母就用英文。移除词数、技术术语过滤和显式语言指令识别。
+- Simplified the approval language rules: if the user prompt contains any Chinese, use Chinese, and for mixed Chinese/English Chinese takes precedence; with no Chinese and with Latin letters present, use English. Word counts, technical-term filtering and explicit language-instruction detection are removed.
 
 ## 0.4.0
 
-- 审批界面随**当前对话语言**自动切换中文/英文：取当前分支最新的可判定真实用户消息，支持「用英文回答 / answer in English / 用中文回答」等明确切换；中性短消息、代码块、行内代码、URL 与路径不参与判断，无可判定内容时保持中文兼容既有行为。
-- 语言由真正用户角色决定，不读取助手回复、工具结果、模型工具参数、`requestReason`、命令正文或插件生成的消息；不调用模型 API，不依赖操作系统语言，也没有模型可指定的 locale 参数。
-- 每次申请把 locale 固定到请求/卡片/结果/审计记录：审批中途手动改语言不会混用；TUI 卡片、底部面板、F2 隐藏提示、两个理由输入框、RPC `select`/`input`、放宽模式确认，以及 `/sandbox exec` 的卡片与通知都会切换语言。
-- 历史重绘使用保存的语言；旧请求/旧卡片缺少 locale 时按中文处理。命令、申请理由和人类填写的文字原样保留，四个选项标签与 off 执行/审批逻辑不变。
-- `reason.ts` 给模型的 continuation 说明也跟随审批语言（用户原文不变）；主目标是可见审批界面。
-- 新增检测、真实工具接线、TUI/RPC、历史卡片、人工 exec 与放宽模式的中英文测试；文档说明自动规则与启发式边界。
+- The approval UI switches between Chinese/English automatically following the **current conversation language**: it takes the latest decidable real user message on the current branch, and supports explicit switches such as "answer in English / answer in English / answer in Chinese"; neutral short messages, code blocks, inline code, URLs and paths do not participate in the decision, and when nothing is decidable it stays Chinese to stay compatible with existing behavior.
+- The language is determined by the actual user role; assistant replies, tool results, model tool arguments, `requestReason`, command bodies and plugin-generated messages are not read; no model API is called, the OS language is not used, and there is no locale parameter that the model can specify.
+- Each request pins the locale onto the request/card/result/audit record: manually changing the language in the middle of an approval cannot mix them; the TUI card, the bottom panel, the F2 hide hint, the two reason input boxes, RPC `select`/`input`, the relaxed-mode confirmation, and the card and notification of `/sandbox exec` all switch language.
+- History redraw uses the saved language; older requests/cards without a locale are treated as Chinese. Commands, request reasons and human-typed text are kept as-is, and the four option labels plus the off execution/approval logic are unchanged.
+- The continuation text that `reason.ts` gives the model also follows the approval language (the user's original text is unchanged); the primary target is the visible approval UI.
+- Added Chinese/English tests for detection, real tool wiring, TUI/RPC, history cards, manual exec and relaxed mode; the documentation explains the automatic rules and the boundaries of the heuristics.
 
 ## 0.3.2
 
-- 整理为可直接上传 GitHub 的源码仓库：发行 tarball、历史版本与开发笔记移出源码树，源码只保留构建所需的文件。
-- 发布流程改为在源码之外生成产物：`npm run pack` 默认写入兄弟目录 `pi-dsh-sandbox-pkg`，并生成 `.sha256`、`.manifest.json`、`latest.json`；`npm run check:package` 做离线清单/校验和核对。
-- 重写面向用户的文档：安装（源码/tarball）、使用与四项审批、配置、安全边界、故障排查、贡献指南。
-- 修正第三方归属说明；补充 `CHANGELOG.md`，供 Pi 在包升级时展示。
-- 修复 npm 安装 tarball 后依赖被提升到上层 `node_modules` 时的运行器探测；安装验收明确禁止依赖全局 DSH。
-- 沙盒模式与审批语义保持不变；本版以发行整理、安装布局兼容和文档为主。
+- Reorganized into a source repository that can be uploaded to GitHub directly: the release tarball, historical versions and development notes were moved out of the source tree, and the source keeps only the files needed for building.
+- The release flow now produces artifacts outside the source: `npm run pack` writes by default into the sibling directory `pi-dsh-sandbox-pkg` and generates `.sha256`, `.manifest.json`, `latest.json`; `npm run check:package` performs offline verification of the manifest and checksums.
+- Rewrote the user-facing documentation: installation (source/tarball), usage and the four approvals, configuration, security boundaries, troubleshooting, contribution guide.
+- Corrected the third-party attribution; added `CHANGELOG.md` for Pi to display when the package is upgraded.
+- Fixed runner detection when dependencies are hoisted into the parent `node_modules` after installing the tarball with npm; installation acceptance now explicitly forbids depending on a global DSH.
+- Sandbox modes and approval semantics are unchanged; this version is mainly about release organization, install-layout compatibility and documentation.
 
 ## 0.3.1
 
-- 审批理由输入框保持**完全空白**，不显示占位文本；标题已说明该填什么。
-- 留空、只输入空白或 `Esc` 取消仍然**不批准**本次操作，不会因为已选中带理由的选项而默认通过。
+- The approval reason input box stays **completely blank** and shows no placeholder text; the title already says what to enter.
+- Leaving it empty, entering only whitespace, or pressing `Esc` to cancel still **does not approve** the operation, and it will not pass by default just because an option with a reason is already selected.
 
 ## 0.3.0
 
-- 审批详情移到消息流里的**黄色卡片**：来源、申请理由、完整命令（`BEGIN/END` 标记之间原样展示）、cwd、模式、超时，不再把整段请求塞进对话框标题。
-- 底部改为小型黄色审批面板，只放四个选项与按键提示；编辑器草稿保留。
-- 新增 `F2`：隐藏面板回看前面的模型输出，再按 `F2` 返回；隐藏期间不执行，选中项与理由保留。
-- 只有显式 `Enter` 才结束待批状态；数字键只移动选择，`Esc`/空白/滚动/隐藏都不批准。
-- 黄色使用固定 RGB，不读取主题的 `warning`，换主题不会变色；RPC/T3 继续使用宿主原生选择框。
+- Approval details moved to a **yellow card** in the message stream: source, request reason, full command (shown verbatim between the `BEGIN/END` markers), cwd, mode, timeout; the whole request is no longer stuffed into the dialog title.
+- The bottom is now a small yellow approval panel holding only the four options and the key hints; the editor draft is preserved.
+- Added `F2`: hide the panel to look back at earlier model output, then press `F2` again to return; nothing executes while it is hidden, and the selected item and the reason are preserved.
+- Only an explicit `Enter` ends the pending state; number keys only move the selection, and `Esc`/blank/scroll/hide never approve.
+- Yellow uses a fixed RGB and does not read the theme's `warning`, so changing the theme does not change the color; RPC/T3 continue to use the host's native select box.
 
 ## 0.2.1
 
-- 审批窗口里的文字明确为**给代理的指示**，与模型的 `reason` 申请理由分开：
-  - `No, and reason…`：拒绝并**不执行**，文字成为当前任务的新用户指示，代理按新方向继续；
-  - `Yes, and reason…`：只执行本次展示的命令，结束后先报告执行事实，再完成补充要求；
-  - 文字不改写命令、不变成持久权限；空白或取消视为不批准。
-- 工具路径把指示写入本次 tool result；人工 `/sandbox exec` 用一条 `followUp` 用户消息投递，避免重复注入。
+- The text in the approval window is explicitly **an instruction to the agent**, separate from the model's `reason` request reason:
+  - `No, and reason…`: refuse and **do not execute**; the text becomes a new user instruction for the current task, and the agent continues in the new direction;
+  - `Yes, and reason…`: execute only the command shown this time, and afterwards report the execution facts first, then fulfil the additional requirement;
+  - the text does not rewrite the command and does not become a persistent permission; blank or cancel counts as no approval.
+- The tool path writes the instruction into this tool result; manual `/sandbox exec` delivers it as one `followUp` user message to avoid duplicate injection.
 
 ## 0.2.0
 
-- 新增模型工具 `sandbox_request`：主动申请**一次性**以 off 执行一条精确 PowerShell 命令。
-- 每次申请都必须经过四项审批（`Yes` / `No` / 两个带理由选项），带可选超时（最大 600 秒）。
-- 批准只对本次命令与固定规范根有效：不改模式、不授予后续权限、不自动重试；拒绝/取消/无 UI/会话变化均 fail-closed。
-- 新增审批审计条目（命令与理由 hash、人类文字、来源），不记录命令输出或文件内容。
+- Added the model tool `sandbox_request`: proactively request **one-time** execution of a single precise PowerShell command with off.
+- Every request must go through the four approvals (`Yes` / `No` / the two options with a reason), with an optional timeout (600 seconds maximum).
+- An approval is valid only for this command and the fixed canonical root: it does not change the mode, does not grant later permissions and does not retry automatically; refusal/cancel/no UI/session change all fail closed.
+- Added approval audit entries (hash of the command and reason, human text, source); command output and file contents are not recorded.
 
 ## 0.1.x
 
-- 建立基本的 Windows 写入限制机制：`powershell`、`bash`、`!` 与 `write`/`edit` 的实际写操作走 DSH Windows ACL 受限令牌运行器。
-- 三种模式：`off` / `read-only` / `workspace-write`；会话根为规范 cwd，`cd` 不扩大授权。
-- `/sandbox` 提供 status、mode、doctor、exec、help；放宽模式需要确认，模型不能切换模式。
-- 缺运行器、平台不支持、配置错误、helper 失败等情况一律 fail-closed，不静默直通。
+- Established the basic Windows write restriction mechanism: the actual write operations of `powershell`, `bash`, `!` and `write`/`edit` go through the DSH Windows ACL restricted-token runner.
+- Three modes: `off` / `read-only` / `workspace-write`; the session root is the canonical cwd, and `cd` does not widen the grant.
+- `/sandbox` provides status, mode, doctor, exec, help; relaxing the mode requires confirmation, and the model cannot switch modes.
+- A missing runner, an unsupported platform, configuration errors, helper failure and the like all fail closed and never pass through silently.

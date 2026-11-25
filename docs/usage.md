@@ -1,126 +1,126 @@
-# 使用
+# Usage
 
-本插件的核心是：在 **read-only** / **workspace-write** 下，普通工具始终走沙盒；只有人类批准的一次性 `sandbox_request` / `/sandbox exec` 才以 off 执行。`off` 模式不介入，普通工具走 Pi 内置路径。
+The core of this extension is: under **read-only** / **workspace-write**, ordinary tools always go through the sandbox; only a one-off `sandbox_request` / `/sandbox exec` approved by a human runs with off. `off` mode does not intervene, and ordinary tools take Pi's built-in path.
 
-## 1. 三种模式
+## 1. The three modes
 
-| mode | 含义 | shell / `!` | `write` / `edit` |
+| mode | meaning | shell / `!` | `write` / `edit` |
 | --- | --- | --- | --- |
-| `off` | 插件不介入 | Pi 内置路径，未受限 | Pi 内置路径，未受限 |
-| `read-only` | 只读 | 受限令牌；任何写入/删除被内核拒绝 | 在任何文件系统调用前拒绝（包括 `mkdir`） |
-| `workspace-write` | 可写工作区 | 受限令牌；只能写授权根 + 私有 temp | 实际落盘由受限进程内的 helper 完成 |
+| `off` | the extension does not intervene | Pi's built-in path, unrestricted | Pi's built-in path, unrestricted |
+| `read-only` | read-only | restricted token; any write/delete is denied by the kernel | denied before any filesystem call (including `mkdir`) |
+| `workspace-write` | writable workspace | restricted token; can write only the authorization root + private temp | the actual write to disk is performed by a helper inside the restricted process |
 
-默认是 `workspace-write`。模式只影响**当前会话**；恢复旧会话不会带回旧会话里放宽过的模式，配置始终以全局设置/CLI 为起点。
+The default is `workspace-write`. The mode affects only the **current session**; restoring an old session does not bring back a mode that was loosened in that old session, and the configuration always starts from the global setting/CLI.
 
-## 2. `/sandbox` 命令
+## 2. The `/sandbox` command
 
-| 命令 | 作用 |
+| Command | Effect |
 | --- | --- |
-| `/sandbox` 或 `/sandbox mode` | 打开模式菜单。当前模式排在首位；`↑`/`↓` 选择、`Enter` 确认、`Esc` 取消。没有交互 UI 时只显示状态与用法 |
-| `/sandbox status` | 显示版本、mode 与来源、规范根、`enforcement: partial`、审批能力、runner/后端版本、temp、ipc、bash 状态 |
-| `/sandbox mode read-only` | 收紧到只读，无需确认 |
-| `/sandbox mode workspace-write` | 放宽到可写工作区，**需要确认** |
-| `/sandbox mode off` | 完全关闭沙盒，**需要确认**；无 UI 时拒绝 |
-| `/sandbox doctor` | 在独立临时工作区做真实自检：只读启动/拒写、根内可写、根内建目录、根外拒写、根外拒删、退出码透传；另用**会话真实工作区根**跑一项「工作区就绪」 |
-| `/sandbox exec <命令>` | 一次性以 off 执行一条精确命令，走与模型相同的四项审批 |
-| `/sandbox help` | 用法 |
+| `/sandbox` or `/sandbox mode` | Opens the mode menu. The current mode is listed first; `↑`/`↓` to select, `Enter` to confirm, `Esc` to cancel. Without an interactive UI, only the status and usage are shown |
+| `/sandbox status` | Shows the version, the mode and its source, the canonical root, `enforcement: partial`, approval capability, runner/backend versions, temp, ipc, and bash state |
+| `/sandbox mode read-only` | Tightens to read-only, no confirmation needed |
+| `/sandbox mode workspace-write` | Widens to the writable workspace, **requires confirmation** |
+| `/sandbox mode off` | Turns the sandbox off entirely, **requires confirmation**; refused when there is no UI |
+| `/sandbox doctor` | Runs a real self-check in a separate temporary workspace: read-only startup/write denial, writable inside the root, directory creation inside the root, write denial outside the root, delete denial outside the root, exit-code passthrough; in addition it runs a "workspace ready" check against the **session's real workspace root** |
+| `/sandbox exec <command>` | Executes one exact command once with off, through the same four-option approval as the model |
+| `/sandbox help` | Usage |
 
-放宽限制（`read-only` → `workspace-write` → `off`）在交互式 TUI 里会用同样的黄色确认卡片/面板；默认选中“取消”，`Esc`、取消、面板不可用或会话变化都**不会**放宽。
+Loosening the restrictions (`read-only` → `workspace-write` → `off`) uses the same yellow confirmation card/panel in the interactive TUI; the default selection is "cancel", and `Esc`, cancel, an unavailable panel, or a session change will **not** loosen anything.
 
-`/sandbox status` 是最快的自检入口。它不会执行任何命令，只读取当前运行时状态。
+`/sandbox status` is the fastest way to self-check. It does not execute any command; it only reads the current runtime state.
 
-## 3. 授权根
+## 3. Authorization root
 
-- 默认根 = 当前会话 `cwd` 的**规范真实路径**（解析 junction、符号链接、8.3 短名）。
-- 一个会话的根在会话开始时固定。命令里 `cd D:\work\demo` 只改变该子进程的工作目录，**不改变授权根**，也不会让 `D:\work\demo` 变成可写。
-- 要让另一个目录成为根：在另一个目录里启动 Pi。不要试图在命令里“切换授权根”。
-- 运行器每次调用的私有 temp 在根之外，子进程的 `TMP`/`TEMP` 会指向那里；`tempRoot` 可改到别的盘。
+- The default root = the **canonical real path** of the current session's `cwd` (resolving junctions, symbolic links, and 8.3 short names).
+- A session's root is fixed when the session starts. `cd D:\work\demo` in a command changes only that child process's working directory; it **does not change the authorization root**, and it does not make `D:\work\demo` writable.
+- To make another directory the root: start Pi in that other directory. Do not try to "switch the authorization root" inside a command.
+- The private temp of each runner invocation is outside the root, and the child process's `TMP`/`TEMP` point there; `tempRoot` can be changed to another drive.
 
-## 4. 模型申请：`sandbox_request`
+## 4. Model request: `sandbox_request`
 
-模型在以下情形可以调用 `sandbox_request`：
+The model may call `sandbox_request` in the following situations:
 
-- 预见普通受限命令会被内核拒绝（例如需要写授权根之外）；
-- 一条受限命令已经明确失败，且确认没有产生副作用，需要完成一个具体的越界操作。
+- it anticipates that an ordinary restricted command will be denied by the kernel (for example, it needs to write outside the authorization root);
+- a restricted command has already failed clearly and, after confirming that no side effect occurred, a specific out-of-bounds operation needs to be completed.
 
-参数：
+Parameters:
 
-| 参数 | 约束 |
+| Parameter | Constraint |
 | --- | --- |
-| `command` | 必填、非空；审批界面展示并执行的**精确 PowerShell 命令**（原样，不改写） |
-| `reason` | 必填、非空；模型自己的申请理由，**只展示给审批人**，不是用户指令 |
-| `timeout` | 可选；有限正数秒，最大 **600**；超时会杀掉命令进程树 |
+| `command` | Required, non-empty; the **exact PowerShell command** displayed and executed by the approval UI (as-is, not rewritten) |
+| `reason` | Required, non-empty; the model's own reason for the request, **shown only to the approver**, not a user instruction |
+| `timeout` | Optional; a finite positive number of seconds, maximum **600**; on timeout the command's process tree is killed |
 
-`cwd` 固定为当前会话的规范授权根，模型不能另外指定 cwd，也不能申请“持久授权”、切换模式或换运行器。
+`cwd` is fixed to the current session's canonical authorization root; the model cannot specify another cwd, and cannot request "persistent authorization", a mode switch, or a different runner.
 
-参数示意（不是让你手写的配置文件）：
+Parameter illustration (not a configuration file for you to write by hand):
 
 ```json
 {
   "command": "New-Item -ItemType Directory -Path 'D:\\work\\demo\\generated' -Force",
-  "reason": "需要把生成的产物写到授权根之外的项目目录",
+  "reason": "The generated artifacts need to be written to a project directory outside the authorization root",
   "timeout": 60
 }
 ```
 
-## 5. 四项审批
+## 5. The four-option approval
 
-模型工具和人工 `/sandbox exec` 使用同一套四项选择：
+The model tool and the manual `/sandbox exec` use the same set of four choices:
 
-| 选项 | 行为 |
+| Option | Behavior |
 | --- | --- |
-| `Yes` | 立即执行**本次、这条精确命令**一次 |
-| `No` | 不执行 |
-| `Yes, and reason…` | 执行本次命令；操作结束后，模型先如实报告执行事实，再完成你填写的补充要求 |
-| `No, and reason…` | **不执行**；你填写的文字是当前任务的新方向，模型据此重新规划 |
+| `Yes` | Immediately executes **this one, exact command** once |
+| `No` | Does not execute |
+| `Yes, and reason…` | Executes this command; after the operation ends, the model first reports the execution facts truthfully and then completes the supplementary requirement you entered |
+| `No, and reason…` | **Does not execute**; the text you enter is the new direction for the current task, and the model replans accordingly |
 
-### 5.1 两种带文字的选项
+### 5.1 The two options with text
 
-- **`Yes, and reason…`**：在输入框填写「本次操作完成后的补充要求」（必填）。命令照屏幕展示的原文执行一次。成功或失败后，模型必须先报告退出码、输出、实际副作用，再完成这条要求（例如解释这次操作的意图、作用与结果），然后继续任务。文字不会改写命令。
-- **`No, and reason…`**：在输入框填写「拒绝原因或新的执行方向」（必填）。命令**绝不执行**。这段文字作为**当前任务的新用户指示**交给模型：模型按新方向重新规划并用普通沙盒工具继续，你不需要再发一遍提示词；如果新方向仍需越界，必须对新的命令重新申请。
+- **`Yes, and reason…`**: fill in the input box with "the supplementary requirement after this operation completes" (required). The command runs once exactly as displayed on screen. After success or failure, the model must first report the exit code, the output, and the actual side effects, then complete this requirement (for example, explain the intent, effect, and result of this operation), and then continue the task. The text does not rewrite the command.
+- **`No, and reason…`**: fill in the input box with "the rejection reason or a new execution direction" (required). The command is **never executed**. This text is handed to the model as a **new user instruction for the current task**: the model replans along the new direction and continues with ordinary sandbox tools, and you do not need to send the prompt again; if the new direction still requires crossing the boundary, a new request must be made for the new command.
 
-文字只作用于模型接下来的行为；**它不是新的持久权限**，不改变模式，不成为后续工具的授权，也不会被拼进命令。
+The text only affects the model's subsequent behavior; **it is not a new persistent permission**, it does not change the mode, it does not authorize later tools, and it is not spliced into the command.
 
-### 5.2 理由输入框的行为
+### 5.2 Behavior of the reason input box
 
-- 两种带文字选项的输入框初始都是**完全空白，没有占位文本**；标题说明该填什么。
-- 输入区有上下两条**黄色分隔线**，已输入的文本与**光标**也是黄色。
-- `Enter` 提交；`Esc` 取消（等于本次不批准）；`Backspace` 删除；`←`/`→`（以及 `Ctrl+A`/`Ctrl+E`）移动；`Ctrl+U`/`Ctrl+K`/`Ctrl+W` 删除；`Ctrl+-`（Windows 的 `Ctrl+Z`）撤销；支持中文与粘贴（粘贴中的换行会并入同一行）。
-- 留空、只输入空白、或取消输入，**本次都不批准**——不会因为已经选了 `Yes, and reason…` 就默认通过。
-- 审批窗口打开时，编辑器里的草稿仍保留；面板关闭后焦点回到编辑器。
+- The input boxes of both text options start out **completely blank, with no placeholder text**; the title states what should be entered.
+- The input area has two **yellow separator lines**, above and below, and the entered text and the **cursor** are also yellow.
+- `Enter` submits; `Esc` cancels (equivalent to not approving this time); `Backspace` deletes; `←`/`→` (as well as `Ctrl+A`/`Ctrl+E`) move; `Ctrl+U`/`Ctrl+K`/`Ctrl+W` delete; `Ctrl+-` (Windows' `Ctrl+Z`) undoes; Chinese input and paste are supported (a line break in the paste is merged into the same line).
+- Leaving it empty, entering only whitespace, or canceling the input **all mean no approval this time** — an already selected `Yes, and reason…` does not make it pass by default.
+- While the approval window is open, the draft in the editor is still preserved; after the panel closes, focus returns to the editor.
 
-### 5.3 交互式 TUI：消息流里的卡片 + 底部小面板
+### 5.3 Interactive TUI: a card in the message stream + a small panel at the bottom
 
-- 完整请求（来源、申请理由、`----- BEGIN COMMAND -----`/`END COMMAND` 之间的完整命令、cwd、模式、off 执行方式、超时）显示在**消息流中的黄色卡片**里，不替换编辑器。
-- 底部是一个小的黄色审批面板，只放四个选项和按键提示；**不重复完整命令**。`1`–`4` 只移动选择，不批准；只有显式 `Enter` 才确认。
-- `F2` 隐藏面板，把焦点交回视口/编辑器，方便用滚轮、`PageUp` 回看前面的模型输出；编辑器上方会出现「审批待处理：… · 按 F2 返回审批面板 · 此时不会执行」。再按 `F2` 返回，选中项和已输入的理由保留。
-- **隐藏不是回答**：隐藏期间不会执行；在编辑器里按 `Enter` 只是发送你自己的消息。`Esc`/`Ctrl+C` 取消，命令不执行。
-- 审批结束后，卡片下方出现结果卡片（已批准/已拒绝/已取消、是否执行、退出码、cwd、模式、你写的指令）。批准**不改变** `/sandbox status` 里的模式。
+- The complete request (source, request reason, the full command between `----- BEGIN COMMAND -----`/`END COMMAND`, cwd, mode, off execution method, timeout) is displayed in a **yellow card in the message stream** and does not replace the editor.
+- At the bottom is a small yellow approval panel holding only the four options and the key hints; it **does not repeat the full command**. `1`–`4` only move the selection and do not approve; only an explicit `Enter` confirms.
+- `F2` hides the panel and hands focus back to the viewport/editor, so you can look back at earlier model output with the wheel or `PageUp`; above the editor, "approval pending: … · press F2 to return to the approval panel · nothing will be executed meanwhile" appears. Press `F2` again to return, and the selected item and the reason you already typed are preserved.
+- **Hiding is not answering**: nothing is executed while hidden; pressing `Enter` in the editor only sends your own message. `Esc`/`Ctrl+C` cancels, and the command is not executed.
+- After the approval ends, a result card appears below the card (approved/rejected/canceled, whether it was executed, exit code, cwd, mode, the instruction you wrote). Approving **does not change** the mode in `/sandbox status`.
 
-TUI 的黄色是固定 RGB 色，不跟随主题的 `warning`；换主题不会让审批界面变成蓝色或绿色。
+The TUI's yellow is a fixed RGB color and does not follow the theme's `warning`; changing themes will not turn the approval UI blue or green.
 
 ### 5.4 RPC / T3 / print / json
 
-- `--mode rpc`（T3 等宿主）保持宿主原生的 `select` + `input` 对话框：标题是纯文本（不含 ANSI），配色与布局由宿主决定；**没有黄色卡片/面板**，但仍然是四选项。
-- `print`/`json` 没有可审批 UI，`sandbox_request` 与 `/sandbox exec` 都 fail-closed，不会自动批准。
-- 没有可确认 UI 的子代理同样无法代为批准；错误信息会提示由上层代理或用户在交互式终端发起。
+- `--mode rpc` (hosts such as T3) keeps the host's native `select` + `input` dialogs: the titles are plain text (without ANSI), and the colors and layout are decided by the host; there is **no yellow card/panel**, but it is still four options.
+- `print`/`json` have no UI that can approve, so both `sandbox_request` and `/sandbox exec` fail closed and are never auto-approved.
+- Subagents without a confirmable UI likewise cannot approve on their behalf; the error message points out that the upper-level agent or the user should initiate it in an interactive terminal.
 
-### 5.5 语言自动跟随对话
+### 5.5 Language follows the conversation automatically
 
-审批界面按用户提示词直接选择中文/英文，没有 `language`/`locale` 配置项，也不读取操作系统语言：
+The approval UI picks Chinese/English directly from the user's prompt; there is no `language`/`locale` configuration item, and the operating system language is not read either:
 
-- **只看当前分支最新的真实用户提示词**：助手回复、工具结果、模型申请理由和插件生成的消息不决定语言。
-- **有中文就用中文**：一个汉字也算；中英混合一律中文优先，提示词里的代码、路径和引用也包含在判断内。
-- **没有中文且含英文字母就用英文**：包括 `ok`、`continue` 等短回复，不计算词数，也不解读语言切换指令。
-- **空消息或只有数字/符号**：继续向前找；没有可用提示词时默认中文。旧卡片没有 locale 时仍按中文显示。
-- **一次审批中途不变**：申请开始时把语言固定到本次请求；审批卡片、底部面板、理由输入框、RPC 的 `select`/`input` 文本、结果卡片、`/sandbox exec` 与放宽模式确认都使用同一语言。之后用户再用另一种语言聊天，也不会让正在等待的审批混语言。
-- **历史卡片按保存的语言重绘**：结果卡片和人工 `/sandbox exec` 的卡片保存当时的语言；工具请求卡片从保存的本次审批语言恢复，不会出现「中文请求 + 英文结果」的拼接。
+- **Only the latest real user prompt on the current branch is considered**: assistant replies, tool results, the model's request reason, and messages generated by the extension do not decide the language.
+- **If there is Chinese, use Chinese**: a single Han character is enough; a mix of Chinese and English is always Chinese-first, and the code, paths, and quotations in the prompt are included in the judgment.
+- **If there is no Chinese and there are English letters, use English**: this includes short replies such as `ok` and `continue`; word counts are not computed, and language-switching instructions are not interpreted.
+- **An empty message or only digits/symbols**: keep searching backward; when there is no usable prompt, the default is Chinese. Old cards without a locale are still displayed in Chinese.
+- **No change in the middle of one approval**: the language is pinned to this request when the request starts; the approval card, the bottom panel, the reason input box, the RPC `select`/`input` text, the result card, `/sandbox exec`, and the mode-loosening confirmation all use the same language. If the user later chats in another language, an approval that is already waiting does not get mixed languages.
+- **Historical cards are redrawn in the language saved at the time**: result cards and manual `/sandbox exec` cards save the language of that moment; tool request cards are restored from the saved language of this approval, so a "Chinese request + English result" splice never appears.
 
-翻译范围是界面文案（标题、来源、标签、超时/等待状态、结果状态、面板/按键/F2 提示、两个理由输入框的标题与说明、RPC 对话框文本、放宽确认、批准/拒绝/取消结果中用户可见的审批提示）。**命令、申请理由、你在审批窗口填写的文字始终原样显示，不会被翻译**；四个选项 `Yes` / `No` / `Yes, and reason…` / `No, and reason…` 也保持固定英文。
+The translation scope is the UI copy (titles, source, labels, timeout/waiting state, result status, panel/key/F2 hints, the titles and descriptions of the two reason input boxes, RPC dialog text, the loosening confirmation, and the user-visible approval prompts in the approved/rejected/canceled result). **Commands, request reasons, and the text you enter in the approval window are always displayed as-is and are never translated**; the four options `Yes` / `No` / `Yes, and reason…` / `No, and reason…` also stay fixed English.
 
-只提供中文/英文界面，不调用模型 API。`/sandbox status`、`/sandbox help` 等诊断输出仍以中文为主，不属于审批界面。
+Only a Chinese/English UI is provided, and no model API is called. Diagnostic output such as `/sandbox status` and `/sandbox help` is still mainly in Chinese and is not part of the approval UI.
 
-## 6. 例子
+## 6. Example
 
 ```text
 /sandbox status
@@ -130,25 +130,25 @@ TUI 的黄色是固定 RGB 色，不跟随主题的 `warning`；换主题不会�
 /sandbox exec New-Item -ItemType Directory -Path 'D:\work\demo\out' -Force
 ```
 
-假设会话在 `D:\work\demo`：
+Assume the session is in `D:\work\demo`:
 
-- `powershell` 写 `D:\work\demo\src\a.txt`：允许。
-- `powershell` 写 `D:\work\other\a.txt`：内核拒绝，工具结果补充 `SANDBOX_DENIED` 提示。
-- `write` 写 `D:\work\other\a.txt`：插件提前给出 `SANDBOX_DENIED`；即便提前检查失效，实际落盘也会被受限 helper 拒绝。
-- 需要写 `D:\work\other`：让模型发起 `sandbox_request`，或人工 `/sandbox exec`，按第 5 节审批。
+- `powershell` writes `D:\work\demo\src\a.txt`: allowed.
+- `powershell` writes `D:\work\other\a.txt`: denied by the kernel, and the tool result adds a `SANDBOX_DENIED` hint.
+- `write` writes `D:\work\other\a.txt`: the extension gives `SANDBOX_DENIED` up front; even if the upfront check fails, the actual write to disk is denied by the restricted helper.
+- To write `D:\work\other`: have the model issue a `sandbox_request`, or do it manually with `/sandbox exec`, and approve it as described in section 5.
 
-## 7. 读、网络与审批
+## 7. Reads, network, and approval
 
-`read`/`ls`/`grep`/`find`、MCP 的 web search/fetch 等**不经过**本插件，也没有额外的写入审批。`sandbox_request` 只负责一次显式的越界**执行**，不是“所有工具都要审批”。
+`read`/`ls`/`grep`/`find`, MCP's web search/fetch, and the like **do not go through** this extension, and there is no additional write approval for them. `sandbox_request` is only responsible for one explicit out-of-bounds **execution**; it does not mean "every tool has to be approved".
 
-## 8. 记录与会话
+## 8. Records and sessions
 
-- 审批会记录 `requestId`/`toolCallId`、时间、cwd、模式、状态、命令与申请理由的 hash，以及人类填写的审批文字和来源。**不记录**命令输出或文件内容。
-- 审批文字会作为指示进入会话（工具路径进入 tool result；人工 `/sandbox exec` 进入一条用户消息），因此会保存在会话记录里。**不要在里面写密码或令牌。**
-- 待批期间切换会话、`/reload`、模式变化、`Ctrl+C` 中断等会让晚到的批准失效；关掉一次审批不会误答下一次。
+- Approvals record the `requestId`/`toolCallId`, the time, the cwd, the mode, the status, hashes of the command and the request reason, and the approval text entered by the human along with its source. Command output and file contents are **not recorded**.
+- The approval text enters the session as an instruction (the tool path goes into the tool result; a manual `/sandbox exec` goes into a user message), so it is saved in the session record. **Do not put passwords or tokens in it.**
+- Switching sessions while an approval is pending, `/reload`, a mode change, a `Ctrl+C` interrupt, and so on invalidate a late approval; closing one approval does not accidentally answer the next one.
 
-## 9. 不要做的事
+## 9. Things not to do
 
-- 不要把 `/sandbox mode off` 当成日常默认；它等于没有安装本插件。
-- 不要因为一次拒绝就反复申请同一条命令；按 `No, and reason…` 的新方向调整后再决定是否需要新的申请。
-- 不要指望 `sandbox_request` 提供“以后都允许”的效果；每次都是一次性、固定 cwd 的审批。
+- Do not treat `/sandbox mode off` as your everyday default; it is the same as not having this extension installed.
+- Do not keep requesting the same command just because of one rejection; adjust to the new direction from `No, and reason…` and only then decide whether a new request is needed.
+- Do not expect `sandbox_request` to have an "allow from now on" effect; every approval is one-off and bound to a fixed cwd.

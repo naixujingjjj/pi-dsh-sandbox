@@ -1,126 +1,146 @@
 # pi-dsh-sandbox
 
-面向 **Windows 10/11 x64** 的 Pi 扩展：把 `powershell`、`bash`、`!`/`!!` 命令以及 `write`/`edit` 的**实际写入**限制在当前会话工作区根内。边界由 Windows 内核强制（受限令牌 + Low 完整性标签），不是插件侧的关键词过滤。
+A Pi extension for **Windows 10/11 x64** that confines the **actual writes** of `powershell`, `bash`, `!`/`!!` commands and of `write`/`edit` to the current session's workspace root. The boundary is enforced by the Windows kernel (restricted token + Low integrity label), not by keyword filtering in the plugin.
 
-> 本项目当前**没有发布到 npm**；请从源码目录或实际发布页下载的 `.tgz` 安装。若以后提供 npm/git 源，以发布说明为准。
+> Repository and install sources: <https://github.com/naixujingjjj/pi-dsh-sandbox>. This package is not published on npm; install it from the GitHub source (`git:github.com/naixujingjjj/pi-dsh-sandbox`), from a source directory, or from a release `.tgz` — see [Installation](#installation).
 
-## 它做什么
+## What it does
 
-- **受限执行**：`powershell`、`bash`、`!`/`!!` 通过包内**内置（vendored）**的 `@deepseek-ai/dsh-sandbox-windows-acl` 受限令牌运行器执行；根外写入/删除被内核拒绝。
-- **写入落盘**：`write`/`edit` 保留 Pi 原有语义（相对路径、精确文本匹配、BOM/换行、diff、每文件队列），只有实际 `mkdir`/写文件交给受限进程内的 helper。
-- **受控出口**：模型可调用 `sandbox_request` 申请**一次性**以 off（不经过沙盒）执行一条精确命令，每次都要人类四项审批；人类也可用 `/sandbox exec`。
-- **失败即关闭**：缺运行器、平台不支持、配置错误、审批 UI 不可用等情况都不会退回未受限执行。
+- **Confined execution**: `powershell`, `bash` and `!`/`!!` run through the `@deepseek-ai/dsh-sandbox-windows-acl` restricted-token runner that is **vendored** inside the package; writes and deletes outside the root are refused by the kernel.
+- **Writes on disk**: `write`/`edit` keep Pi's original semantics (relative paths, exact text matching, BOM/line endings, diffs, per-file queues). Only the actual `mkdir`/file write is handed to a helper inside the confined process.
+- **Controlled escape hatch**: the model may call `sandbox_request` to ask for **one** exact command to run once in `off` mode (outside the sandbox), with the human's four-way approval every time; a human can also use `/sandbox exec`.
+- **Fail closed**: a missing runner, an unsupported platform, a configuration error or an unavailable approval UI never falls back to unconfined execution.
 
-## 它不做什么（重要）
+## What it does not do (important)
 
-- **不限制读**：受限子进程能读你有权读的任何文件（包括其它工作区、`~/.ssh`）；`read`/`ls`/`grep`/`find` 仍是 Pi 原生行为。
-- **不限制网络**：受限子进程可以联网；MCP web 工具也不经过本插件。
-- **不是容器**：不限制进程可见性、CPU/内存或用户身份。
-- **不是完整隔离**：内核保证为 `enforcement: partial`，只覆盖写入/删除。
-- **不覆盖整个宿主**：第三方扩展、MCP 工具、扩展直接调用的 `pi.exec`/文件 API 不受本插件约束。
+- **It does not restrict reads**: a confined child process can read any file you can read (including other workspaces and `~/.ssh`); `read`/`ls`/`grep`/`find` keep Pi's native behaviour.
+- **It does not restrict the network**: confined child processes can go online; MCP web tools do not pass through this plugin either.
+- **It is not a container**: it does not restrict process visibility, CPU, memory or user identity.
+- **It is not complete isolation**: the kernel guarantee is `enforcement: partial` and covers writes and deletes only.
+- **It does not cover the whole host**: third-party extensions, MCP tools, and `pi.exec`/file APIs called directly by an extension are not constrained by this plugin.
 
-## 常驻副作用（安装前请读）
+## Persistent side effects (read before installing)
 
-`workspace-write` 会在**授权根**上留下跨会话、跨重启的改动：一条能力 SID 允许 ACE、一条 `FILE_DELETE_CHILD` 拒绝 ACE，以及（当根还没有通过继承处于 Low 时）**Low 完整性标签**。它们**不会**随会话结束或卸载插件撤销；Low 标签还会让其它以 Low 完整性运行的进程写这个目录树。
+`workspace-write` leaves changes on the **authorization root** that outlive the session and the reboot: a capability-SID allow ACE, a `FILE_DELETE_CHILD` deny ACE, and — when the root does not already inherit Low integrity — a **Low integrity label**. They are **not** reverted when the session ends or the plugin is removed, and a Low label also lets other processes running at Low integrity write to that directory tree.
 
-- 0.4.2 起包内 vendored 后端在根已通过继承具备 Low no-write-up 时只改 DACL、不重写现有标签，因此这类布局**不需要额外补 `WRITE_OWNER`/`(WO)`**；正常授权仍会写上面两条 ACE（那是沙盒授权本身）。
-- 不可逆的“通用回滚”很危险：**不要**用 `icacls <根> /reset /T`，它会抹掉你原有的自定义 ACL。
-- 需要保留内容时，在首次使用前备份 DACL（用 `Get-Acl` 只取 Access 一节）；恢复时用 `Set-Acl` 只写回 DACL，owner/group 与 Low 标签不变。
-- 可丢弃的临时副本用完即弃，是最简单的回滚。
+- Since 0.4.2 the vendored backend only rewrites the DACL when the root already has Low no-write-up through inheritance, so it does not touch the existing label in such layouts and needs no extra `WRITE_OWNER`/`(WO)`; a normal authorization still writes the two ACEs above (that is the sandbox authorization itself).
+- A generic, irreversible "rollback" is dangerous: **do not** use `icacls <root> /reset /T`, it wipes the custom ACLs you already had.
+- When the content must be preserved, back up the DACL before first use (`Get-Acl` and keep only the `Access` section); restore it with `Set-Acl` writing only the DACL back, leaving owner/group and the Low label unchanged.
+- A throwaway temporary copy that you delete afterwards is the simplest rollback.
 
-细节、限制与备份示例见 [docs/security.md](docs/security.md)。**不要为了卸载插件而删除需要保留的真实项目。**
+Mechanisms, limits and backup examples are in [docs/security.md](docs/security.md). **Do not delete a real project you need in order to uninstall the plugin.**
 
-## 系统要求
+## Requirements
 
-| 项 | 要求 |
+| Item | Requirement |
 | --- | --- |
-| 平台 | Windows 10/11 **x64**；其它平台在 confined 模式下报 `SANDBOX_UNAVAILABLE` |
-| Node | **建议 24 LTS**；最低 **22.19**（与 Pi 的要求一致） |
+| Platform | Windows 10/11 **x64**; other platforms report `SANDBOX_UNAVAILABLE` in confined modes |
+| Node | **Node 24 LTS recommended**; **22.19** minimum (the same floor Pi requires) |
 | Pi | `@earendil-works/pi-coding-agent` **>= 1.6** |
-| 运行器 | 本包**内置**（vendored）已打补丁的 `@deepseek-ai/dsh-sandbox-windows-acl@0.2.2-rc.5+pi-dsh.1`（`vendor/`）；无需全局 DSH，也不用改 `node_modules` |
-| 可选 | Git for Windows 的 `bash.exe`（否则 `bash` 与 `!` 会被拒绝） |
-| 网络 | 安装运行依赖需要联网 |
+| Runner | **Vendored** in this package: a patched `@deepseek-ai/dsh-sandbox-windows-acl@0.2.2-rc.5+pi-dsh.1` under `vendor/`. No global DSH install is needed, and `node_modules` is left alone |
+| Optional | Git for Windows' `bash.exe` (otherwise `bash` and `!` are refused) |
+| Network | Installing the runtime dependencies needs network access |
 
-## 安装
+## Installation
 
-### 从源码目录安装（推荐）
+### From the GitHub source (recommended)
 
 ```powershell
-cd C:\src\pi-dsh-sandbox
-npm ci --include=optional
+# Try it in this process only; nothing is written to your settings
+pi -e git:github.com/naixujingjjj/pi-dsh-sandbox
 
-# 只在本次进程里试用，不写配置
-pi -e C:\src\pi-dsh-sandbox
+# Once /sandbox status looks right, add it to the global settings.json packages
+pi install git:github.com/naixujingjjj/pi-dsh-sandbox
 
-# 确认可用后写入全局 settings.json 的 packages
-pi install C:\src\pi-dsh-sandbox
+# Pin a version by appending @<tag>, @<branch> or @<commit> (no tags exist yet; use a commit hash)
+pi install git:github.com/naixujingjjj/pi-dsh-sandbox@<commit>
 ```
 
-- `--include=optional` **必须带**：`koffi` 的原生二进制是 optional 依赖，省略后运行器无法加载。
-- npm 需要联网安装运行依赖；源码目录与其中的 `node_modules` 必须保留，Pi 按**绝对路径**加载本地包，不会复制它。
-- `pi install` 只把该目录加入 Pi 的全局 `packages`，不会改你的 `defaultTools` 或本插件以外的文件。
-- 依赖里的宿主包（`@earendil-works/*`、`typebox`）是**可选 peer**，由 Pi 提供，不需要、也不应再装一份。
+- Pi clones the repository into its own directory and runs `npm install --omit=dev --legacy-peer-deps` inside it. Optional dependencies are included, so `koffi`'s platform binary lands on disk and you never run `npm ci` by hand.
+- Network access is required: the clone and the runtime dependencies (`koffi`, `yaml`, `@deepseek-ai/dsh-*`) all come from the npm registry.
+- Pi owns that directory. Do not develop in it and do not leave your own files there: `pi update --extensions` syncs with `git clean -fdx` and reinstalls dependencies.
+- After installing, the `runner:` line of `/sandbox status` must point at `vendor\dsh-sandbox-windows-acl\lib\runner.js` **inside the package directory**; if it points anywhere else, you loaded a different runner.
 
-### 从 `.tgz` 安装
-
-**不能**把 `.tgz` 直接交给 `pi install`：Pi 会把文件路径当作扩展源码，而不是一个待安装的包。先把 tarball 安装到一个固定位置，再用该位置里的包目录：
+### From a source directory (development or offline investigation)
 
 ```powershell
-$tgz = "C:\src\downloads\pi-dsh-sandbox-0.4.2.tgz"   # 换成实际文件
+$repo = "$env:USERPROFILE\src\pi-dsh-sandbox"   # change this; do not move or delete it afterwards
+git clone https://github.com/naixujingjjj/pi-dsh-sandbox.git $repo
+cd $repo
+npm ci --include=optional
+
+# Try it in this process only; nothing is written to your settings
+pi -e $repo
+
+# Once it works, add it to the global settings.json packages
+pi install $repo
+```
+
+- `--include=optional` is **mandatory**: `koffi`'s native binary is an optional dependency, and leaving it out makes the runner fail to load the native module.
+- npm needs network access for the runtime dependencies; the source directory and its `node_modules` must be kept, because Pi loads a local package by **absolute path** and never copies it.
+- `pi install` only adds that directory to Pi's global `packages`; it does not change your `defaultTools` or any file outside this plugin.
+- Host packages among the dependencies (`@earendil-works/*`, `typebox`) are **optional peers** provided by Pi: do not install a second copy of them.
+
+### From a `.tgz`
+
+**You cannot** hand a `.tgz` straight to `pi install`: Pi treats a file path as extension source, not as a package to install. Install the tarball into a fixed location first, then use the package directory inside it:
+
+```powershell
+$tgz = "$env:USERPROFILE\Downloads\pi-dsh-sandbox-<version>.tgz"   # the file you downloaded
 $extRoot = "$env:LOCALAPPDATA\pi-extensions"
 
 New-Item -ItemType Directory -Force -Path $extRoot | Out-Null
 npm install --prefix $extRoot --include=optional --omit=dev "$tgz"
 
-# 包目录必须保留，不要删除或移动
+# The package directory must be kept; do not delete or move it
 pi install "$extRoot\node_modules\pi-dsh-sandbox"
 ```
 
-- `.tgz` 里是源码、文档与包内 vendored 后端（`vendor/`），**不是**自带全部依赖的离线包；`npm install` 会联网取 `koffi`/`yaml`/DSH 运行依赖。
-- 不要把 `.tgz` 解压后直接 `pi install <解压目录>`，除非你已在那个目录里装好运行依赖（见上一节）。
-- 如果 `npm` 提示缺少 `koffi` 或 `@deepseek-ai/dsh-*`，见 [docs/troubleshooting.md](docs/troubleshooting.md)。
+- The `.tgz` carries the source, the docs and the vendored backend (`vendor/`); it is **not** an offline bundle with every dependency, so `npm install` fetches `koffi`/`yaml`/the DSH runtime packages over the network.
+- Do not unpack the `.tgz` and run `pi install <unpacked dir>` unless you already installed the runtime dependencies in that directory (see the previous section).
+- If `npm` reports a missing `koffi` or `@deepseek-ai/dsh-*`, see [docs/troubleshooting.md](docs/troubleshooting.md).
 
-### 已安装后
+## After installation
 
-- 改了插件代码、更新了包，或改了 `piDshSandbox` 配置：在 Pi 里执行 `/reload`。
-- 检查是否加载成功：`/sandbox status`；做一次真实自检：`/sandbox doctor`。
-- 卸载：`pi remove <pi list 中显示的同一 source>`。本地包的 source 是绝对路径；卸载只从 `packages` 移除，**不撤销**上面说的 ACL/Low 标签。
+- After changing the plugin code, updating the package or changing the `piDshSandbox` configuration, run `/reload` inside Pi.
+- Check that it loaded: `/sandbox status`. Do a real self-test: `/sandbox doctor`.
+- Uninstall: `pi remove <the same source pi list shows>`. For a local package the source is an absolute path; removing only takes it out of `packages` and does **not** revert the ACLs/Low label described above.
 
-## 三种模式
+## The three modes
 
 | mode | `powershell` / `bash` / `!` | `write` / `edit` |
 | --- | --- | --- |
-| `off` | Pi 内置路径（未受限） | Pi 内置路径（未受限） |
-| `read-only` | 受限令牌，任何写入/删除都被内核拒绝 | 在任何文件系统调用前拒绝（包括建目录） |
-| `workspace-write`（默认） | 受限令牌，只能写授权根 + 运行器私有 temp | 实际落盘由受限进程内的 helper 完成 |
+| `off` | Pi's built-in path (unconfined) | Pi's built-in path (unconfined) |
+| `read-only` | Restricted token; every write and delete is refused by the kernel | Refused before any filesystem call (including directory creation) |
+| `workspace-write` (default) | Restricted token; only the authorization root plus the runner's private temp | The actual write is performed by a helper inside the confined process |
 
-默认是 `workspace-write`，装上即生效。`/sandbox` 打开模式菜单；放宽限制（例如切到 `off`）需要额外确认。只有人类命令能改当前会话的模式，模型没有切换模式的工具。
+The default is `workspace-write`, which takes effect as soon as the plugin is installed. `/sandbox` opens the mode menu; widening the confinement (for example switching to `off`) needs an extra confirmation. Only human commands can change the current session's mode; the model has no tool to switch it.
 
-## 授权根与 `cd`
+## Authorization root and `cd`
 
-- 授权根 = 当前会话 `cwd` 的**规范真实路径**（解析 junction/符号链接/8.3 短名），每个会话固定一次。
-- 命令里 `cd` 到别处**不会扩大**授权根；运行器的 `--workspace` 与 spawn 的 cwd 始终是那个根。
-- 想让另一个目录成为根：在另一个目录里启动 Pi 会话。
-- temp 根默认 `%LOCALAPPDATA%\pi-dsh-sandbox\tmp`，必须在工作区之外；可用 `tempRoot` 改到别的盘。
+- The authorization root is the **canonical real path** of the current session `cwd` (junctions, symlinks and 8.3 short names resolved), fixed once per session.
+- `cd` inside a command does **not** widen the root; the runner's `--workspace` and the spawned cwd always stay that root.
+- To make another directory the root, start the Pi session in that directory.
+- The temp root defaults to `%LOCALAPPDATA%\pi-dsh-sandbox\tmp` and must be outside the workspace; `tempRoot` can move it to another drive.
 
-## 越界审批（摘要）
+## Out-of-root approval (summary)
 
-模型调用 `sandbox_request` 时必须给 `command`（精确 PowerShell 命令）、`reason`（申请理由，只展示给审批人）、可选 `timeout`（正数秒，最大 600）。审批只对**本次命令 + 固定 cwd**有效：
+When the model calls `sandbox_request` it must provide `command` (the exact PowerShell command), `reason` (the justification, shown only to the approver) and optionally `timeout` (positive seconds, at most 600). An approval covers **this one command plus the fixed cwd** only:
 
-| 选项 | 行为 |
+| Option | Behaviour |
 | --- | --- |
-| `Yes` | 只执行这一次，不改模式 |
-| `No` | 不执行 |
-| `Yes, and reason…` | 执行这一次；操作结束后，模型先报执行事实，再完成你填写的补充要求 |
-| `No, and reason…` | **不执行**；你填写的文字成为当前任务的新方向，模型据此重新规划 |
+| `Yes` | Runs it once; the mode is unchanged |
+| `No` | Not executed |
+| `Yes, and reason…` | Runs it once; afterwards the model reports what happened and then fulfils your added instruction |
+| `No, and reason…` | **Not executed**; the text you write becomes the task's new direction and the model replans from it |
 
-审批窗口里的文字是**给代理的指示**，不是附言，也不会被拼进命令。交互式 TUI 里审批详情是消息流中的**黄色卡片**，底部是黄色小面板；`F2` 可隐藏面板回看前面的输出，再按 `F2` 返回。只有显式 `Enter` 才算答复，`Esc` 或空白理由都不批准。RPC/T3 保持宿主原生选择框，`print`/`json` 没有审批 UI 时一律不执行。
+The text in the approval window is **an instruction for the agent**, not a side note, and it is never spliced into the command. In the interactive TUI an approval is a **yellow card** in the message stream with a small yellow panel at the bottom; `F2` hides the panel so you can scroll back through earlier output, and `F2` again brings it back. Only an explicit `Enter` counts as an answer — `Esc` or a blank reason approves nothing. RPC/T3 keep the host's native chooser, and `print`/`json` never execute anything without an approval UI.
 
-完整交互、按键与示例见 [docs/usage.md](docs/usage.md)。审批语言按当前分支最新用户提示词判断：**有中文就用中文，中英混合也用中文；没有中文且有英文字母就用英文**。不再分析词数、技术术语或“用某语言回答”等句意。申请开始后固定语言，历史卡片按保存语言重绘；命令、申请理由和你填写的文字原样保留。
+The full interaction, keys and examples are in [docs/usage.md](docs/usage.md). The approval language follows the latest user prompt on the current branch: **use Chinese when it contains Chinese, including mixed Chinese and English; use English when it has no Chinese and contains Latin letters**. Word counts, technical terms and instructions such as "answer in language X" are no longer analysed. The language is fixed once the request starts, and historical cards are redrawn in the language they were saved in; the command, the reason and the text you write are kept verbatim.
 
-## 配置（摘要）
+## Configuration (summary)
 
-只读 **全局** `~/.pi/agent/settings.json`（Windows：`%USERPROFILE%\.pi\agent\settings.json`）中的 `piDshSandbox` 段，以及四个 `--sandbox-*` CLI 参数。项目内的 `.pi/settings.json` **完全被忽略**，防止仓库自己把模式改成 `off`。
+Only the `piDshSandbox` section of the **global** `~/.pi/agent/settings.json` (on Windows: `%USERPROFILE%\.pi\agent\settings.json`) is read, plus the four `--sandbox-*` CLI options. A project's `.pi/settings.json` is **ignored entirely**, which stops a repository from switching the mode to `off` by itself.
 
 ```json
 {
@@ -130,33 +150,33 @@ pi install "$extRoot\node_modules\pi-dsh-sandbox"
 }
 ```
 
-`runnerModule`、`dshRoot`、`tempRoot` 都是可选的；显式配置了无效路径会直接报错，不会悄悄换成别的运行器。`additionalWritableRoots` 等“额外可写根”配置会被拒绝（当前插件只配置一个会话根，不支持持久额外根）。
+`runnerModule`, `dshRoot` and `tempRoot` are all optional; an explicitly configured invalid path is reported as an error instead of silently selecting a different runner. "Extra writable root" settings such as `additionalWritableRoots` are rejected (the current plugin configures exactly one session root and does not support persistent extra roots).
 
-完整字段、优先级和不可用项见 [docs/configuration.md](docs/configuration.md)。
+The complete fields, precedence and unsupported options are in [docs/configuration.md](docs/configuration.md).
 
-## 已知边界（节选）
+## Known boundaries (excerpt)
 
-- **硬链接是文件对象别名**：同一文件在根外的硬链接仍可写（机制固有）。
-- **安装类命令常失败**：`npm/pip install` 写 `~/.npm`、`~/.cache` 等根外路径会被拒绝；可把缓存改到工作区，或对单条命令走 `/sandbox exec`。
-- **`read-only` 下 PowerShell 可能进 `ConstrainedLanguage`**：`Add-Type`、COM、反射不可用；这是后端行为。
-- **部分管道 `spawn` 会 `EPERM`**：受限于后端对新建命名管道的限制；Node 测试与 Pi 内置本地 PowerShell 后端可能受影响。
-- **`cmd.exe` 的中文拒绝信息是 GBK**：按 UTF-8 解码可能认不出拒绝；`node`/`pwsh` 的拒绝更可靠。
-- **`bash` 拒绝 WSL 启动器**：它把命令交给 Linux 虚拟机，Windows 令牌管不到；请用 Git Bash 等非 WSL bash。
+- **Hard links are file-object aliases**: the same file hard-linked outside the root is still writable (inherent to the mechanism).
+- **Installer-style commands often fail**: `npm/pip install` writing `~/.npm`, `~/.cache` and similar paths outside the root are refused; move the cache into the workspace, or use `/sandbox exec` for a single command.
+- **Under `read-only` PowerShell may drop to `ConstrainedLanguage`**: `Add-Type`, COM and reflection are unavailable; this is backend behaviour.
+- **Some piped `spawn` calls return `EPERM`**: a backend limit on creating new named pipes; Node tests and Pi's built-in local PowerShell backend can be affected.
+- **`cmd.exe` writes its refusal message in the ANSI code page**: Chinese refusals may be unreadable when decoded as UTF-8; `node`/`pwsh` refusals are more reliable.
+- **`bash` refuses the WSL launcher**: it hands the command to a Linux VM that the Windows token cannot reach; use a non-WSL bash such as Git Bash.
 
-更多机制、回滚与“不做”的范围见 [docs/security.md](docs/security.md)；出问题先看 [docs/troubleshooting.md](docs/troubleshooting.md)。
+More on the mechanism, rollback and what is out of scope is in [docs/security.md](docs/security.md); when something breaks start with [docs/troubleshooting.md](docs/troubleshooting.md).
 
-## 文档与开发
+## Documentation and development
 
-| 文档 | 内容 |
+| Document | Content |
 | --- | --- |
-| [docs/installation.md](docs/installation.md) | 源码/tarball 安装、卸载、目录保留 |
-| [docs/usage.md](docs/usage.md) | 三模式、命令、四审批、F2、按键 |
-| [docs/configuration.md](docs/configuration.md) | 配置字段、CLI 参数、优先级 |
-| [docs/security.md](docs/security.md) | partial 边界、ACL 副作用、回滚 |
-| [docs/troubleshooting.md](docs/troubleshooting.md) | 缺依赖、runner、WSL、管道、UI |
-| [docs/releasing.md](docs/releasing.md) | 上传源码、打包与发布产物 |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | 开发、测试、打包 |
-| [CHANGELOG.md](CHANGELOG.md) | 版本变化 |
-| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | 第三方归属 |
+| [docs/installation.md](docs/installation.md) | GitHub source / source directory / tarball install, uninstall, keeping the directory |
+| [docs/usage.md](docs/usage.md) | Three modes, commands, the four approvals, F2, keys |
+| [docs/configuration.md](docs/configuration.md) | Configuration fields, CLI options, precedence |
+| [docs/security.md](docs/security.md) | The partial boundary, ACL side effects, rollback |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | Missing dependencies, runner, WSL, pipes, UI |
+| [docs/releasing.md](docs/releasing.md) | Uploading the source, packing and release artefacts |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development, tests, packing |
+| [CHANGELOG.md](CHANGELOG.md) | Version history |
+| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Third-party attribution |
 
-本包以 MIT 许可发布，见 [LICENSE](LICENSE)。运行依赖与归属见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+This package is released under the MIT license, see [LICENSE](LICENSE). Runtime dependencies and their attribution are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

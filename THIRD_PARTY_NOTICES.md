@@ -1,55 +1,55 @@
-# 第三方归属 / Third-Party Notices
+# Third-Party Notices
 
-本包（`pi-dsh-sandbox`）自身以 **MIT** 许可发布，见 [LICENSE](LICENSE)。
+This package (`pi-dsh-sandbox`) is itself released under the **MIT** license; see [LICENSE](LICENSE).
 
-下面按本仓库 `package.json` / `package-lock.json` 以及锁定版本的安装结果，列出运行时**调用或依赖**的第三方组件。各组件版权与许可条款归其各自作者所有；再分发时请以对应包内的 `LICENSE` 原文为准。本文件是归属说明，不是法律意见。
+Based on this repository's `package.json` / `package-lock.json` and on the installed result of the locked versions, the following lists the third-party components that are **called or depended on** at runtime. Copyright and license terms for each component belong to its respective authors; when redistributing, the authoritative text is the `LICENSE` shipped in the corresponding package. This file is an attribution statement, not legal advice.
 
-## 运行时依赖
+## Runtime dependencies
 
-| 组件 | 版本 | 许可 | 用途 |
+| Component | Version | License | Purpose |
 | --- | --- | --- | --- |
-| `@deepseek-ai/dsh-sandbox-windows-acl` | `0.2.2-rc.5` + 本地补丁（包内版本标识 `0.2.2-rc.5+pi-dsh.1`） | MIT | Windows ACL 受限令牌沙盒后端。**本包原样内置源码副本**于 `vendor/dsh-sandbox-windows-acl/`（含上游 `LICENSE`、`patches/`、`pin.json`、`PROVENANCE.json`）；本插件调用其 `lib/runner.js` |
-| `@deepseek-ai/dsh-win32-process` | `0.2.2-rc.5` | MIT | 受限进程、stdio、Job 对象与 Win32 原语 |
-| `@deepseek-ai/dsh-subprocess` | `0.2.2-rc.5` | MIT | runner 使用的子进程控制通道约定（直接依赖） |
-| `@deepseek-ai/dsh-skill` | `0.2.2-rc.5` | MIT | 内置后端 `acl-skill` 模块使用（直接依赖） |
-| `@deepseek-ai/dsh-lazy-require` | `0.2.2-rc.5` | MIT | 延迟加载 |
-| `@deepseek-ai/cordis` | `4.1.0` | MIT | 后端的 peer 依赖 |
+| `@deepseek-ai/dsh-sandbox-windows-acl` | `0.2.2-rc.5` + local patches (version identifier inside the package: `0.2.2-rc.5+pi-dsh.1`) | MIT | Windows ACL restricted-token sandbox backend. **This package vendors a verbatim copy of its source** in `vendor/dsh-sandbox-windows-acl/` (including the upstream `LICENSE`, `patches/`, `pin.json`, `PROVENANCE.json`); this extension calls its `lib/runner.js` |
+| `@deepseek-ai/dsh-win32-process` | `0.2.2-rc.5` | MIT | Restricted processes, stdio, Job objects and Win32 primitives |
+| `@deepseek-ai/dsh-subprocess` | `0.2.2-rc.5` | MIT | Subprocess control-channel convention used by the runner (direct dependency) |
+| `@deepseek-ai/dsh-skill` | `0.2.2-rc.5` | MIT | Used by the bundled backend's `acl-skill` module (direct dependency) |
+| `@deepseek-ai/dsh-lazy-require` | `0.2.2-rc.5` | MIT | Lazy loading |
+| `@deepseek-ai/cordis` | `4.1.0` | MIT | Peer dependency of the backend |
 | `koffi` | `3.1.1` | MIT | Win32 FFI |
-| `@koromix/koffi-win32-x64` | `3.1.1`（optional） | MIT | `koffi.node` 预编译二进制；`npm install --include=optional` 时必须安装 |
-| `yaml` | `2.9.x`（后端声明 `^2.4.2`） | ISC | ACL 后端内部使用 |
+| `@koromix/koffi-win32-x64` | `3.1.1` (optional) | MIT | Prebuilt `koffi.node` binary; must be installed with `npm install --include=optional` |
+| `yaml` | `2.9.x` (backend declares `^2.4.2`) | ISC | Used internally by the ACL backend |
 
-除包内 vendored 后端外，这些包通过 npm 依赖树安装；本仓库**只**复制该后端的 MIT 源码、编译产物与上游 `LICENSE`（`vendor/dsh-sandbox-windows-acl/`），并保留补丁与来源哈希。首次使用前请阅读该目录的 `PATCH.md` 与 `PROVENANCE.json`。
+Apart from the backend vendored in this package, these packages are installed through the npm dependency tree; this repository copies **only** that backend's MIT source, build output and upstream `LICENSE` (`vendor/dsh-sandbox-windows-acl/`), and preserves the patch and provenance hashes. Read `PATCH.md` and `PROVENANCE.json` in that directory before first use.
 
-## 宿主提供的 peer（不打包）
+## Peer dependencies provided by the host (not bundled)
 
-| 组件 | 许可 | 用途 |
+| Component | License | Purpose |
 | --- | --- | --- |
-| `@earendil-works/pi-coding-agent` | MIT | Pi 扩展宿主；本包只在 `peerDependencies` 声明，Pi 加载扩展时把 `@earendil-works/*`、`typebox` 映射到宿主自身模块，不出现第二份宿主副本 |
-| `@earendil-works/pi-tui` | MIT | 审批卡片与审批面板使用其 TUI 组件/工具：`Container`、`Text`、`Input`，`Component`/`Focusable`/`OverlayHandle`/`TUI` 类型，按键匹配，ANSI 安全的宽度/换行/截断，控制字符与转义清理，以及 `rgbColor`。用途不限于 `Text` |
-| `typebox` | MIT | `sandbox_request` 的参数 schema（`Type.Object` 等）。由宿主提供并映射，本包不打包副本 |
+| `@earendil-works/pi-coding-agent` | MIT | Pi extension host; this package declares it only in `peerDependencies`, and when Pi loads an extension it maps `@earendil-works/*`, `typebox` to the host's own modules, so no second copy of the host appears |
+| `@earendil-works/pi-tui` | MIT | The approval card and the approval panel use its TUI components/utilities: `Container`, `Text`, `Input`, the `Component`/`Focusable`/`OverlayHandle`/`TUI` types, key matching, ANSI-safe width/wrapping/truncation, control-character and escape sanitization, and `rgbColor`. The use is not limited to `Text` |
+| `typebox` | MIT | Parameter schema for `sandbox_request` (`Type.Object` etc.). Provided and mapped by the host; this package does not bundle a copy |
 
-`peerDependenciesMeta` 将上述三项标为 **optional**：由 Pi 提供；安装本包的运行依赖时不需要也不应再装一份。
+`peerDependenciesMeta` marks the three items above as **optional**: they are provided by Pi; when installing this package's runtime dependencies you do not need, and should not install, a second copy.
 
-## 设计参考
+## Design references
 
-- 包含判定（`src/policy.ts`）参考了 DSH `packages/fs/fs-sandbox/src/containment.ts`（MIT）的“词法快路径 + 真实路径祖先校验”思路；本仓库为独立实现，未复制上游源码。
-- 拒绝签名与 runner 失败签名沿用 DSH `packages/sandbox/sandbox-local/src/index.ts`（MIT）的公开常量（`windows-acl-run: ` / exit 127 / `DENIAL_SIGNATURES`），并追加了中文本地化与 `EPERM` 判据。
+- Containment checks (`src/policy.ts`) follow the "lexical fast path + real-path ancestor verification" approach of DSH `packages/fs/fs-sandbox/src/containment.ts` (MIT); this repository is an independent implementation and does not copy upstream source.
+- Denial signatures and runner failure signatures reuse the public constants of DSH `packages/sandbox/sandbox-local/src/index.ts` (MIT) (`windows-acl-run: ` / exit 127 / `DENIAL_SIGNATURES`), with added Chinese localization and an `EPERM` criterion.
 
-## 内置（vendored）上游副本
+## Bundled (vendored) upstream copy
 
-`@deepseek-ai/dsh-sandbox-windows-acl`（MIT，<https://github.com/deepseek-ai/deepseek-harness>）以 npm 发布版
-`0.2.2-rc.5` 为基础，在 `vendor/dsh-sandbox-windows-acl/` 内保留 `src/` 与构建产物 `lib/`，并附：
+`@deepseek-ai/dsh-sandbox-windows-acl` (MIT, <https://github.com/deepseek-ai/deepseek-harness>) is based on the npm
+release `0.2.2-rc.5`, keeps `src/` and the build output `lib/` inside `vendor/dsh-sandbox-windows-acl/`, and includes:
 
-- `LICENSE`：上游 MIT 许可原文；
-- `patches/`：本次补丁的 unified diff（可用 `git apply` 审阅）；
-- `pin.json`：上游 tarball 版本与 SHA-256、补丁哈希；
-- `PROVENANCE.json`：构建工具版本与每个产物文件的 SHA-256。
+- `LICENSE`: the verbatim upstream MIT license;
+- `patches/`: the unified diff of this patch (reviewable with `git apply`);
+- `pin.json`: the upstream tarball version and SHA-256, and the patch hash;
+- `PROVENANCE.json`: the build tool versions and the SHA-256 of each output file.
 
-上游 `0.2.2-rc.5` 发布版**没有**包含这个补丁；本包不声称该修复已发布到上游。
+The upstream `0.2.2-rc.5` release does **not** include this patch; this package does not claim that the fix has been released upstream.
 
-## 上游项目
+## Upstream projects
 
-- DSH / `deepseek-harness`：<https://github.com/deepseek-ai/deepseek-harness>
-- Pi / `pi`：<https://github.com/earendil-works/pi>
+- DSH / `deepseek-harness`: <https://github.com/deepseek-ai/deepseek-harness>
+- Pi / `pi`: <https://github.com/earendil-works/pi>
 
-如果要在再分发时满足各上游的许可条件，请保留对应包附带的版权与许可文本；本文件不替代它们。
+To satisfy each upstream's license conditions when redistributing, keep the copyright and license texts shipped with the corresponding packages; this file does not replace them.

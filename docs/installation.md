@@ -1,163 +1,187 @@
-# 安装
+# Installation
 
-本文覆盖两种安装来源：**源码目录**和**发布页的 `.tgz`**。两种方式最终都是让 Pi 加载一个本地包目录；运行依赖由 npm 安装，安装时需要联网。
+This document covers three install sources: **the GitHub source (recommended)**, **a source directory** and **a release `.tgz`**. All three end with Pi loading a package directory; the runtime dependencies come from npm, so installing needs network access.
 
-> 本文不假设具体的 GitHub 仓库地址。请从项目实际发布页下载源码压缩包或 `.tgz`。
+> Repository: <https://github.com/naixujingjjj/pi-dsh-sandbox>. The GitHub source is written `git:github.com/naixujingjjj/pi-dsh-sandbox`. Source archives and `.tgz` files come from that repository's releases or from `git clone`.
 
-## 1. 系统要求
+## 1. Requirements
 
-| 项 | 要求 |
+| Item | Requirement |
 | --- | --- |
-| 操作系统 | **Windows 10/11 x64**。其它平台在 confined 模式下会报 `SANDBOX_UNAVAILABLE`；只有你显式把模式切成 `off` 才会回到 Pi 内置执行路径 |
-| Node.js | **建议 Node 24 LTS**；最低 **22.19**（`engines` 与 Pi 的要求） |
+| Operating system | **Windows 10/11 x64**. Other platforms report `SANDBOX_UNAVAILABLE` in confined modes; only an explicit switch to `off` returns to Pi's built-in execution path |
+| Node.js | **Node 24 LTS recommended**; **22.19** minimum (`engines` and Pi's own floor) |
 | Pi | `@earendil-works/pi-coding-agent` **>= 1.6** |
-| 运行器 | 本包**内置**（vendored）打好补丁的 `@deepseek-ai/dsh-sandbox-windows-acl@0.2.2-rc.5+pi-dsh.1`，位于包内 `vendor/`。**不需要**全局安装 DSH |
-| 可选 bash | Git for Windows、MSYS2 或 Cygwin 的 `bash.exe`；WSL 的 `bash.exe` 会被拒绝 |
-| 网络 | 源码安装和 tgz 安装都需要从 npm 源取运行依赖 |
-| 权限 | 当前用户对工作区目录有正常读写权限；首次 `workspace-write` 授权需要能修改该目录的 DACL/SACL |
+| Runner | A patched `@deepseek-ai/dsh-sandbox-windows-acl@0.2.2-rc.5+pi-dsh.1`, **vendored** in this package under `vendor/`. A global DSH install is **not** needed |
+| Optional bash | `bash.exe` from Git for Windows, MSYS2 or Cygwin; WSL's `bash.exe` is refused |
+| Network | Both the source install and the tarball install fetch the runtime dependencies from the npm registry |
+| Permissions | The current user has normal read/write access to the workspace directory; the first `workspace-write` authorization must be able to change that directory's DACL/SACL |
 
-Node 与 Pi 的版本在启动时就会影响扩展加载；先用 `node --version`、`pi --version` 确认。
+The Node and Pi versions matter for extension loading already at startup; confirm with `node --version` and `pi --version` first.
 
-## 2. 从源码目录安装
+## 2. From the GitHub source (recommended)
 
-### 2.1 取得源码并放在固定目录
-
-从发布页下载源码压缩包并解压，或 clone 仓库，放到一个**固定的绝对路径**，例如：
-
-```text
-C:\src\pi-dsh-sandbox
-```
-
-目录里应当直接看到 `package.json`、`package-lock.json`、`src\index.ts`。
-
-### 2.2 安装运行依赖
+Nothing has to be prepared locally: Pi clones the repository itself and runs `npm install --omit=dev --legacy-peer-deps` inside the clone (optional dependencies are included, so `koffi`'s platform binary lands on disk).
 
 ```powershell
-cd C:\src\pi-dsh-sandbox
+# Load only in this Pi process, writing no configuration
+pi -e git:github.com/naixujingjjj/pi-dsh-sandbox
+
+# Once /sandbox status looks right, add it to the global packages
+pi install git:github.com/naixujingjjj/pi-dsh-sandbox
+
+# Pin a version (tag, branch or commit); unpinned sources follow pi update --extensions
+pi install git:github.com/naixujingjjj/pi-dsh-sandbox@<commit>
+```
+
+Notes:
+
+- Network access is required: the clone and the runtime dependencies (`koffi`, `yaml`, `@deepseek-ai/dsh-*`) all come from the npm registry.
+- Pi owns that directory. Do not develop in it or keep your own files there: `pi update --extensions` runs `git clean -fdx` and then reinstalls the dependencies. To change code, use the source-directory route in the next section.
+- The `runner:` line of `/sandbox status` must point at `vendor\dsh-sandbox-windows-acl\lib\runner.js` **inside the package directory**; if it points anywhere else, you loaded a different runner than the one this package vendors.
+- To uninstall, use the source `pi list` shows: `pi remove git:github.com/naixujingjjj/pi-dsh-sandbox`. Removing it does **not** revert the ACEs/Low label that `workspace-write` wrote (see [security](security.md)).
+
+## 3. From a source directory
+
+### 3.1 Get the source into a fixed directory
+
+Clone the repository (or download and unpack a source archive) into a **fixed absolute path**, for example:
+
+```powershell
+$repo = "$env:USERPROFILE\src\pi-dsh-sandbox"   # change this; do not move or delete it afterwards
+git clone https://github.com/naixujingjjj/pi-dsh-sandbox.git $repo
+```
+
+The directory should directly contain `package.json`, `package-lock.json` and `src\index.ts`. The rest of this section uses `$repo` for that directory — keep running the commands in the same PowerShell session.
+
+### 3.2 Install the runtime dependencies
+
+```powershell
+cd $repo
 npm ci --include=optional
 ```
 
-说明：
+Notes:
 
-- `--include=optional` **必须带**。`koffi` 的平台二进制包是 optional 依赖；省略或加上 `--omit=optional` 会让运行器在加载原生模块时失败。
-- `npm ci` 要求 `package-lock.json` 存在，并严格按锁文件安装；这正是我们希望的可复现安装。
-- 只想要运行依赖、不要开发工具时，可以加 `--omit=dev`：
+- `--include=optional` is **mandatory**. `koffi`'s platform binaries are optional dependencies; leaving them out or adding `--omit=optional` makes the runner fail when it loads the native module.
+- `npm ci` requires `package-lock.json` and installs strictly from the lock file — exactly the reproducible install we want.
+- For runtime dependencies only, without the development tooling, add `--omit=dev`:
 
   ```powershell
   npm ci --include=optional --omit=dev
   ```
 
-- **不要加 `--omit=peer`**，除非你确认运行器 import 的包都已落盘。本包把 `@deepseek-ai/dsh-subprocess`、`dsh-win32-process`、`dsh-lazy-require`、`dsh-skill` 声明为直接 `dependencies`，但它们自身的 peer（如 `@deepseek-ai/cordis`）需要 npm 正常安装；`--omit=peer` 可能让它们缺失，运行器会在 import 时失败。
-- 本包声明给宿主 Pi 的 peer（`@earendil-works/pi-coding-agent`、`@earendil-works/pi-tui`、`typebox`）是**可选 peer**，由 Pi 在加载扩展时提供。不要为了它们安装第二份副本。
-- 安装依赖需要联网。若 npm 缓存/镜像缺包，见 [troubleshooting](troubleshooting.md)。
+- Do **not** add `--omit=peer` unless you have confirmed that every package the runner imports is on disk. This package declares `@deepseek-ai/dsh-subprocess`, `dsh-win32-process`, `dsh-lazy-require` and `dsh-skill` as direct `dependencies`, but their own peers (such as `@deepseek-ai/cordis`) have to be installed normally by npm; `--omit=peer` can leave them missing and the runner then fails at import time.
+- The peers this package declares to the host Pi (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `typebox`) are **optional peers** supplied by Pi when it loads the extension. Do not install a second copy of them.
+- Installing the dependencies needs network access. If your npm cache or mirror lacks a package, see [troubleshooting](troubleshooting.md).
 
-### 2.3 先临时加载，再正式安装
+### 3.3 Load it temporarily first, then install it for real
 
 ```powershell
-# 只在本次 Pi 进程里加载，不写任何配置
-pi -e C:\src\pi-dsh-sandbox
+# Load only in this Pi process, writing no configuration
+pi -e $repo
 
-# 确认 /sandbox status 正常后，写入全局 packages
-pi install C:\src\pi-dsh-sandbox
+# Once /sandbox status looks right, write it to the global packages
+pi install $repo
 ```
 
-- `pi install` 记录的是**解析后的绝对路径**，不会复制源码目录。**不要删除或移动** `C:\src\pi-dsh-sandbox`，也不要删掉它的 `node_modules`；否则下次启动会加载失败。
-- `pi install` 只改 Pi 全局 `settings.json` 的 `packages` 数组。它**不会**改你的 `defaultTools`、主题、模型或其它设置；安装本插件也不需要你手工编辑任何用户设置。
-- 安装后启动 Pi，或在已运行的 Pi 里执行 `/reload`，然后运行 `/sandbox status`。
+- `pi install` records the **resolved absolute path** and does not copy the source directory. Do not delete or move the directory `$repo` points at, and do not delete its `node_modules`; otherwise the next start fails to load.
+- `pi install` only changes the `packages` array in Pi's global `settings.json`. It does **not** change your `defaultTools`, themes, models or any other setting; installing this plugin never needs hand-edited user settings.
+- After installing, start Pi (or run `/reload` in a running Pi), then run `/sandbox status`.
 
-### 2.4 如果只想跑一次
+### 3.4 If you only want one run
 
-`pi -e <绝对目录>` 是临时加载：不写 `packages`，进程退出即结束。适合先验证 `/sandbox doctor`，再决定是否正式安装。
+`pi -e <absolute dir>` is a temporary load: nothing is written to `packages` and everything ends when the process exits. That is the right way to verify `/sandbox doctor` before committing to the install.
 
-## 3. 从 `.tgz` 安装
+## 4. From a `.tgz`
 
-### 3.1 为什么不能直接 `pi install <tgz>`
+### 4.1 Why `pi install <tgz>` does not work
 
-Pi 的本地 source 规则是：**文件路径按单个扩展源码加载，目录路径按包发现规则加载**。`.tgz` 是压缩包，不是扩展源码；直接 `pi install .\pi-dsh-sandbox-0.3.2.tgz` 不会把它当作 npm 包安装。
+Pi's rule for local sources is: **a file path loads as one extension source, a directory path follows the package discovery rules**. A `.tgz` is an archive, not extension source, so `pi install .\pi-dsh-sandbox-<version>.tgz` does not install it as an npm package.
 
-正确做法是先用 npm 把 tarball 装进一个固定目录，再把该目录里的包目录交给 `pi install`。
+The correct way is to use npm to install the tarball into a fixed directory and then hand the package directory inside it to `pi install`.
 
-### 3.2 准备固定目录
+### 4.2 Prepare a fixed directory
 
-建议使用一个专门放本地扩展的固定位置，例如：
+Use a dedicated fixed location for local extensions, for example:
 
 ```powershell
 $extRoot = "$env:LOCALAPPDATA\pi-extensions"
 New-Item -ItemType Directory -Force -Path $extRoot | Out-Null
 ```
 
-这个目录以后不要随意删除或移动；Pi 记录的是它内部的绝对路径。
+Do not delete or move this directory later; Pi records the absolute path inside it.
 
-### 3.3 安装 tarball 及其依赖
+### 4.3 Install the tarball and its dependencies
 
 ```powershell
-$tgz = "C:\src\downloads\pi-dsh-sandbox-0.4.2.tgz"   # 换成你下载的文件
+$tgz = "$env:USERPROFILE\Downloads\pi-dsh-sandbox-<version>.tgz"   # the file you downloaded
 npm install --prefix $extRoot --include=optional --omit=dev "$tgz"
 ```
 
-说明：
+Notes:
 
-- `.tgz` 只包含本包的源码/文档/内置后端，**不包含** `node_modules`，也不是“离线全依赖包”。`npm install` 会联网安装 `koffi`、`yaml` 与 DSH 运行依赖。
-- `.tgz` **包含** `vendor/dsh-sandbox-windows-acl/`（打好补丁的后端源码、编译产物、来源与哈希记录）；它是交付的一部分，不要用旧 tarball 或手工拷来的文件替代。
-- `--include=optional` 仍然必须带，否则 `koffi` 的平台二进制不会落盘。
-- 同样**不要加 `--omit=peer`**，原因见 2.2：当前后端把运行所需的 DSH 包声明为 peer。
-- npm 可能在该目录生成/更新 `package.json`、`package-lock.json`；保留它们，后续 `pi install` 不需要它们，但删除目录再重装时会用到锁文件。
-- 如果你下载的发布页同时提供 `.sha256` 或 `.manifest.json`，先核对校验和再安装。
+- The `.tgz` contains only this package's source, docs and vendored backend — **not** `node_modules` — and is not an "offline bundle with every dependency". `npm install` fetches `koffi`, `yaml` and the DSH runtime dependencies over the network.
+- The `.tgz` **does** contain `vendor/dsh-sandbox-windows-acl/` (the patched backend source, build output, provenance and hash records); it is part of the delivery — do not replace it with an older tarball or hand-copied files.
+- `--include=optional` is still mandatory, otherwise `koffi`'s platform binaries are not written to disk.
+- Likewise do **not** add `--omit=peer`, for the reason in 3.2: the current backend declares the DSH packages it runs on as peers.
+- npm may create or update `package.json` and `package-lock.json` in that directory; keep them. `pi install` does not need them, but reinstalling after deleting the directory does use the lock file.
+- If the release also ships a `.sha256` or `.manifest.json`, verify the checksum before installing.
 
-安装完成后应存在：
+After the install this must exist:
 
 ```text
 %LOCALAPPDATA%\pi-extensions\node_modules\pi-dsh-sandbox\
 ```
 
-### 3.4 交给 Pi
+### 4.4 Hand it to Pi
 
 ```powershell
 pi install "$extRoot\node_modules\pi-dsh-sandbox"
 ```
 
-然后启动 Pi 或 `/reload`，用 `/sandbox status` 确认：
+Then start Pi or run `/reload`, and check with `/sandbox status`:
 
-- `mode` 是 `workspace-write`（默认）；
-- `runner:` 指向**包内**的 `vendor\dsh-sandbox-windows-acl\lib\runner.js`；
-- `backend:` 显示 `@deepseek-ai/dsh-sandbox-windows-acl 0.2.2-rc.5+pi-dsh.N（来源：vendor）`；
-- `enforcement: partial`。
+- `mode` is `workspace-write` (the default);
+- `runner:` points at the **in-package** `vendor\dsh-sandbox-windows-acl\lib\runner.js`;
+- `backend:` shows `@deepseek-ai/dsh-sandbox-windows-acl 0.2.2-rc.5+pi-dsh.N (source: vendor)`;
+- `enforcement: partial`.
 
-符合上述内容即说明包内 vendored 后端可用，**不需要全局 DSH**。若 `runner:` 指向 `node_modules` 里的旧后端或某个全局 DSH，说明加载的不是本版本，先 `/reload`，再检查包目录是否完整。
+If that matches, the vendored backend inside the package is usable and **no global DSH is needed**. If `runner:` points at an old backend under `node_modules` or at some global DSH, you are not running this version: run `/reload` first, then check that the package directory is complete.
 
-### 3.5 不要把包目录解压出来直接加载
+### 4.5 Do not unpack the package directory and load it directly
 
-仅在一种情况下可以直接 `pi install <目录>`：该目录本身有 `package.json`，且已经装好运行依赖（即 2.2 的 `npm ci`）。只解压 tarball 而不装依赖，会让 `runnerModule`/`koffi` 缺失。
+Only one case allows `pi install <dir>` directly: the directory itself has a `package.json` and the runtime dependencies are already installed (that is the `npm ci` from 3.2). Unpacking a tarball without installing the dependencies leaves `runnerModule`/`koffi` missing.
 
-## 4. 已安装后的更新与卸载
+## 5. Updating and uninstalling after installation
 
-- **更新源码**：替换源码文件后重新 `npm ci --include=optional`，再 `/reload`。
-- **更新 tgz**：重新执行 3.3 的 `npm install`，再 `/reload`。旧版本文件会在同一包目录内被替换；不要手工删除整个 `pi-extensions`。
-- **卸载**：
+- **Updating a git install**: nothing to do by hand; `pi update --extensions` syncs the clone and reinstalls the dependencies. A source pinned to a tag, branch or commit keeps its ref.
+- **Updating the source**: replace the source files, run `npm ci --include=optional` again, then `/reload`.
+- **Updating the tgz**: rerun the `npm install` from 4.3, then `/reload`. The old version's files are replaced inside the same package directory; do not delete the whole `pi-extensions` by hand.
+- **Uninstalling**:
 
   ```powershell
   pi list
-  pi remove <pi list 中显示的同一 source>
+  pi remove <the same source pi list shows>
   ```
 
-  本地包通常显示为绝对路径；用**同一个 source** 移除。`pi remove` 只从 `packages` 移除，不删除目录，也**不撤销** `workspace-write` 已写入的 ACE/Low 标签。
+  A git-source install shows `git:github.com/naixujingjjj/pi-dsh-sandbox`; a local package usually shows an absolute path — remove it with the **same source**. `pi remove` only removes the entry from `packages`: it does not delete the directory and does **not** revert the ACEs/Low label that `workspace-write` wrote.
 
-## 5. 安装后的最小验收
+## 6. Minimal acceptance after installation
 
 ```text
-/sandbox status        # 模式、根、runner、后端版本、temp、bash
-/sandbox doctor        # 在独立临时工作区做真实写内/拒外/拒删/只读自检
+/sandbox status        # mode, root, runner, backend version, temp, bash
+/sandbox doctor        # real self-test in a separate temporary workspace: write inside, refuse outside, refuse delete, read-only
 ```
 
-`doctor` 全部 PASS 表示沙盒后端可用。若失败，先看 [troubleshooting](troubleshooting.md)，不要为了“能用”而默认把模式改成 `off`。
+All PASS in `doctor` means the sandbox backend works. If it fails, read [troubleshooting](troubleshooting.md) first, and do not default the mode to `off` just to "make it work".
 
-## 6. 常见安装问题的入口
+## 7. Entry points for common installation problems
 
-| 症状 | 先看 |
+| Symptom | Start with |
 | --- | --- |
-| 缺 `koffi`、`Cannot find module 'koffi'` | [troubleshooting: 原生模块](troubleshooting.md#原生模块-koffi-加载失败) |
-| 找不到 runner | [troubleshooting: runner](troubleshooting.md#找不到运行器) |
-| `bash` 被拒绝 / 检测到 WSL | [troubleshooting: bash](troubleshooting.md#bash-与--命令被拒绝) |
-| 配置改了不生效 | [troubleshooting: 配置](troubleshooting.md#改了配置但不生效) |
-| 模式或 UI 不符合预期 | [usage](usage.md) 与 [troubleshooting: 审批](troubleshooting.md#审批没有执行) |
-| 想回滚 ACL/目录 | [security: 回滚](security.md#7-回滚与恢复) |
+| Missing `koffi`, `Cannot find module 'koffi'` | [troubleshooting: native module](troubleshooting.md#koffi-native-module-fails-to-load) |
+| Runner not found | [troubleshooting: runner](troubleshooting.md#runner-not-found) |
+| `bash` refused / WSL detected | [troubleshooting: bash](troubleshooting.md#bash-and--commands-are-refused) |
+| Configuration changes have no effect | [troubleshooting: configuration](troubleshooting.md#configuration-changes-do-not-take-effect) |
+| Mode or UI behaves differently than expected | [usage](usage.md) and [troubleshooting: approval](troubleshooting.md#approval-did-not-execute) |
+| Want to roll back the ACLs/directory | [security: rollback](security.md#7-rollback-and-recovery) |
