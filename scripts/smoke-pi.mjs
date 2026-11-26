@@ -12,7 +12,7 @@
  *  - the `bash` override is registered but NOT active, and refuses the WSL launcher.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,7 +25,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const base = mkdtempSync(join(tmpdir(), "pidsbx-smoke-"));
+// Canonical, not the %TEMP% 8.3 spelling: src/policy.ts resolves the root with realpathSync.native,
+// and GitHub's Windows runner returns `C:\Users\RUNNER~1\...` from tmpdir().
+const base = realpathSync.native(mkdtempSync(join(tmpdir(), "pidsbx-smoke-")));
 const workspace = join(base, "ws");
 const outside = join(base, "out");
 const agentDir = join(base, "agent");

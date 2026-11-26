@@ -1,10 +1,11 @@
 /** Real Pi SDK + extension loader with an invalid runner; isolated agent settings, no model calls. */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-const base = mkdtempSync(join(tmpdir(), "pidsbx-failure-"));
+// Canonical, not the %TEMP% 8.3 spelling: src/policy.ts resolves the root with realpathSync.native.
+const base = realpathSync.native(mkdtempSync(join(tmpdir(), "pidsbx-failure-")));
 const workspace = join(base, "workspace");
 const agentDir = join(base, "agent");
 mkdirSync(workspace);

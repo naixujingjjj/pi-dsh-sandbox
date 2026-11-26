@@ -17,7 +17,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,7 +26,9 @@ import { assertPackageFiles } from "./lib/package.mjs";
 import { locateRunner } from "../src/runner.ts";
 
 const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const work = mkdtempSync(join(tmpdir(), "pidsbx-pack-"));
+// Canonical, not the %TEMP% 8.3 spelling: the installed package reports the canonical root, and
+// src/policy.ts resolves it with realpathSync.native.
+const work = realpathSync.native(mkdtempSync(join(tmpdir(), "pidsbx-pack-")));
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 process.env.PI_CODING_AGENT_DIR = join(work, "isolated-agent");
 const passed = [];

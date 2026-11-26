@@ -12,13 +12,15 @@
  */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const work = mkdtempSync(join(tmpdir(), "pidsbx-cli-"));
+// Canonical, not the %TEMP% 8.3 spelling: the CLI reports the canonical root, and src/policy.ts
+// resolves it with realpathSync.native.
+const work = realpathSync.native(mkdtempSync(join(tmpdir(), "pidsbx-cli-")));
 const agentDir = join(work, "isolated-agent");
 mkdirSync(agentDir);
 writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultTools: ["-bash", "+powershell"] }));
