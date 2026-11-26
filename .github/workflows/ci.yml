@@ -28,10 +28,14 @@ jobs:
       - run: npm run test:pack
       - run: npm run pack
       - run: npm run check:package
+      # `pack` writes outside the source tree on purpose, and upload-artifact@v7 rejects any path
+      # containing '..'. `runner.workspace` is that same parent directory, as an absolute path.
+      - name: List the packaged release
+        run: Get-ChildItem "${{ runner.workspace }}\pi-dsh-sandbox-pkg" | Select-Object Name,Length
       - uses: actions/upload-artifact@v7
         with:
           name: pi-dsh-sandbox
           path: |
-            ../pi-dsh-sandbox-pkg/*.tgz
-            ../pi-dsh-sandbox-pkg/*.sha256
-            ../pi-dsh-sandbox-pkg/*.manifest.json
+            ${{ runner.workspace }}/pi-dsh-sandbox-pkg/*.tgz
+            ${{ runner.workspace }}/pi-dsh-sandbox-pkg/*.sha256
+            ${{ runner.workspace }}/pi-dsh-sandbox-pkg/*.manifest.json
