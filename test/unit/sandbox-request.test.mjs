@@ -339,13 +339,16 @@ test("the tool prompt guidelines tell the model what both reason options mean", 
 	const { definition } = setup();
 	const guidelines = (definition.promptGuidelines ?? []).join("\n");
 	assert.match(guidelines, /No, and reason…/);
-	assert.match(guidelines, /新用户指示/);
-	assert.match(guidelines, /不要重新提交同一条命令/);
+	assert.match(guidelines, /new user instruction/);
+	assert.match(guidelines, /Do not resubmit the same command/);
 	assert.match(guidelines, /Yes, and reason…/);
-	assert.match(guidelines, /先如实报告执行事实/);
-	assert.match(guidelines, /再完成用户填写的补充要求/);
-	assert.match(guidelines, /不要把它拼进 PowerShell/);
-	assert.doesNotMatch(guidelines, /审批意见只是人类的反馈|仅反馈|不会改写你提交的命令/);
+	assert.match(guidelines, /first report the facts truthfully/);
+	assert.match(guidelines, /then complete the requirement the human wrote/);
+	assert.match(guidelines, /do not splice it into PowerShell/);
+	// The human UI stays bilingual; the tool metadata the model reads is English only.
+	assert.equal(/\p{Script=Han}/u.test(guidelines), false, "the guidelines carry no CJK text");
+	assert.equal(/\p{Script=Han}/u.test(`${definition.description}\n${definition.label}\n${definition.promptSnippet}`), false);
+	assert.equal(/\p{Script=Han}/u.test(JSON.stringify(definition.parameters)), false, "no parameter description carries CJK text");
 });
 
 test("an approved command that fails to start still carries the human requirement", async () => {

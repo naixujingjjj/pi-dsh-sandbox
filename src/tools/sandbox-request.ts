@@ -60,17 +60,17 @@ export const MAX_REQUEST_TIMEOUT_SECONDS = 600;
 const sandboxRequestParameters = Type.Object({
 	command: Type.String({
 		description:
-			"要执行的一条精确 PowerShell 命令。执行的就是审批窗口里展示的原文，用户填写的补充指令不会改写它。",
+			"The one exact PowerShell command to run. The approval window shows exactly this text; a supplementary instruction the human types there does not rewrite it.",
 		minLength: 1,
 	}),
 	reason: Type.String({
 		description:
-			"为什么这条命令需要越界/未受限执行（你的申请理由，必填）。它只展示给审批人；人类在审批窗口填写的文字才是给你的用户指示。",
+			"Why this command needs unrestricted (out-of-sandbox) execution — your request reason, required. It is shown to the approver only; text the human types into the approval window is a user instruction to you.",
 		minLength: 1,
 	}),
 	timeout: Type.Optional(
 		Type.Number({
-			description: `可选超时（秒，正数，最大 ${MAX_REQUEST_TIMEOUT_SECONDS}）。超时会杀掉命令进程树。`,
+			description: `Optional timeout in seconds (positive, at most ${MAX_REQUEST_TIMEOUT_SECONDS}). On timeout the command's process tree is killed.`,
 			exclusiveMinimum: 0,
 			maximum: MAX_REQUEST_TIMEOUT_SECONDS,
 		}),
@@ -370,25 +370,28 @@ export function registerSandboxRequestTool(
 	const createOperations = options.createOperations ?? createLocalPowerShellOperations;
 	pi.registerTool({
 		name: SANDBOX_REQUEST_TOOL,
-		label: "sandbox_request（一次性未受限，需人类审批）",
+		label: "sandbox_request (one-shot unrestricted, needs human approval)",
 		description:
-			"申请并立即执行一条精确的 PowerShell 命令，以 off（不经过沙盒）方式运行一次。命令、理由必填；" +
-			"审批只对本次命令与当前会话规范授权根有效，不改变 /sandbox 模式，不授予后续 write/edit/powershell 权限。" +
-			"批准后会直接执行并返回输出；拒绝或取消不会执行。人类可以在审批窗口选「No, and reason…」拒绝并给出新的执行方向，" +
-			"或选「Yes, and reason…」批准并附上本次操作完成后的要求；两者都会作为用户补充指令交给你，在本次调用的 tool result 里注明。" +
-			"仅在预见内核会拒绝、或普通受限命令已经明确失败后使用；不要因 stderr 看似拒绝就自动重跑已经执行过的命令。" +
-			"沙盒运行器初始化失败（windows-acl-run / 工作区未就绪）不是越界，本工具无法修复它。",
-		promptSnippet: "申请一次性未受限执行（需要人类四项审批，审批文字是给你的指示）",
+			"Request one exact PowerShell command and run it immediately once, with off (no sandbox). " +
+			"The command and the reason are required. The approval covers only this command and the session's canonical root; " +
+			"it does not change the /sandbox mode and grants nothing to later write/edit/powershell calls. " +
+			"An approval runs the command at once and returns its output; a decline or a cancel runs nothing. " +
+			"The human can choose \"No, and reason…\" to decline and give a new direction, or \"Yes, and reason…\" to approve " +
+			"with a requirement to complete after this operation; either text reaches you as a user instruction and is marked in this call's tool result. " +
+			"Use this tool only when the operation needs to go outside the authorized root or the kernel would refuse it, or when a sandboxed command has already failed clearly; " +
+			"never re-run a command that already ran just because stderr looks like a refusal. " +
+			"A sandbox runner that failed to initialize (windows-acl-run / workspace not ready) is not an escape hatch this tool can fix.",
+		promptSnippet: "Request one unrestricted one-shot execution, approved by a human whose text is your instruction",
 		promptGuidelines: [
-			"通常优先使用已有沙盒保护的 powershell/write/edit；只有确实需要写授权根之外、或完成一次会被内核拒绝的具体操作时才调用 sandbox_request。",
-			"sandbox_request 需要人类当场审批，批准后立即执行；它不会改变会话模式，也不会给后续工具任何授权。",
-			"你的 reason 参数只是你的申请理由，展示给审批人；人类在审批窗口填写的文字才是给你的用户指示，两者不要混为一谈。",
-			"如果审批是「No, and reason…」：这条命令已经被拒绝、不会执行，用户填写的文字是当前任务的新用户指示。不要重新提交同一条命令，也不要把它当普通错误结束任务；按新指示重新规划并用普通沙盒工具继续。新方向如果仍需越界，另提交一条新的精确命令并等待新审批。",
-			"如果审批是「Yes, and reason…」：这条命令已被批准且只执行一次；执行结果（成功或失败）出来后，先如实报告执行事实（退出码、输出、副作用），再完成用户填写的补充要求（例如解释这次操作的意图、作用与结果），然后继续当前任务。",
-			"用户填写的文字只作用于你接下来的行为，不会改写已展示的命令：不要把它拼进 PowerShell，也不要因此执行任何未在审批窗口展示过的命令。",
-			"拒绝或取消后尊重结果：不要自动反复申请同一命令；根据用户的新指示调整后如确有必要，再发起一次新的申请。",
-			"不要因为普通命令失败或 stderr 中出现权限字样就自动改用 sandbox_request；先确认命令是否已经产生副作用。",
-			"如果失败原因是沙盒运行器自身初始化失败（`windows-acl-run:` / runner-failure / 工作区就绪），不要用 sandbox_request 绕过：它只执行一条一次性命令，既不修复工作区也不修复运行器，逐条申请只会制造审批轰炸。把诊断（含 /sandbox doctor 的「工作区就绪」结果）报告给人类，修复后再用普通受限工具重试同一条命令。",
+			"Prefer the already-sandboxed powershell/write/edit tools; call sandbox_request only when the operation genuinely needs to write outside the authorized root, or when it is one concrete action the kernel would refuse.",
+			"sandbox_request needs a human approval and executes immediately once approved; it does not change the session mode and grants nothing to later tool calls.",
+			"Your reason argument is only your request reason, shown to the approver; text the human types into the approval window is a user instruction to you. Never conflate the two.",
+			"If the approval is \"No, and reason…\": that command is declined and will not run, and the human's text is a new user instruction for the current task. Do not resubmit the same command and do not end the task as if it were an ordinary error; replan from the new instruction and continue with the ordinary sandboxed tools. If the new direction still needs to go out of bounds, submit a new exact command and wait for a new approval.",
+			"If the approval is \"Yes, and reason…\": that command is approved and runs exactly once. When the execution result (success or failure) is in, first report the facts truthfully (exit code, output, side effects), then complete the requirement the human wrote (for example explain the intent, effect and result of the operation), then continue the current task.",
+			"The human's text only governs your next behaviour and never rewrites the command that was displayed: do not splice it into PowerShell, and do not run any command that was not shown in the approval window.",
+			"Respect a decline or a cancel: do not automatically request the same command again; after adjusting to the new instruction, submit a fresh request only if it is genuinely needed.",
+			"Do not fall back to sandbox_request just because an ordinary command failed or stderr mentions permissions; first establish whether the command has already produced side effects.",
+			"If the failure is the sandbox runner itself failing to initialize (`windows-acl-run:` / runner-failure / workspace readiness), do not bypass it with sandbox_request: one-shot execution neither fixes the workspace nor the runner, and a request per command only creates an approval storm. Report the diagnostics (including the workspace readiness result of /sandbox doctor) to the human, and retry the same command with the ordinary sandboxed tool once it is fixed.",
 		],
 		// The card in the message stream owns the wording: the row renders its own frame, so it stays
 		// one yellow block instead of a themed tool shell with mixed toolTitle/accent/dim colors.
