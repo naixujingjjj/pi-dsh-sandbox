@@ -379,7 +379,7 @@ function escapeRegex(value) {
  * plugin's own confined shell cannot write security descriptors. Every directory used here lives
  * under this file's throw-away `%TEMP%` tree.
  */
-test("a workspace root that only inherits the Low label is granted without an ACL change", { skip }, async () => {
+test("a workspace root that only inherits the Low label is granted without an ACL change", { skip }, async (t) => {
 	const parent = join(base, "acl 父目录");
 	const child = join(parent, "acl 子目录");
 	const childTemp = join(base, "acl temp 根");
@@ -404,6 +404,17 @@ test("a workspace root that only inherits the Low label is granted without an AC
 	assert.equal(deny.status, 0, deny.text);
 	const label = icacls(parent, "/setintegritylevel", "(OI)(CI)L");
 	assert.equal(label.status, 0, label.text);
+	// The stripped parent must carry no inherited ACE any more, otherwise the layout under test cannot
+	// be built at all. GitHub's Windows runner keeps an owner/SYSTEM/Administrators full-control
+	// bridge on the local %TEMP% that survives /inheritance:r and then hands the child the very ACE
+	// this test forbids. That is a host ACL difference, not a backend defect: skip with the evidence
+	// instead of reporting a failure the plugin has no say in.
+	const parentAcl = icacls(parent);
+	assert.equal(parentAcl.status, 0, parentAcl.text);
+	if (/\(I\)/.test(parentAcl.text) && accountPattern.test(parentAcl.text)) {
+		t.skip(`this host's %TEMP% keeps an inherited full-control ACE after /inheritance:r:\n${parentAcl.text}`);
+		return;
+	}
 	// The temporary deny must be removed even when an assertion below throws, or the throw-away
 	// tree cannot be deleted by the file-level `after` hook.
 	try {
@@ -412,7 +423,11 @@ test("a workspace root that only inherits the Low label is granted without an AC
 	const before = icacls(child);
 	assert.equal(before.status, 0, before.text);
 	// The precondition under test: the child did NOT inherit the account's full control.
-	assert.equal(accountPattern.test(before.text), false, `child must not inherit ${account} full control:\n${before.text}`);
+	assert.equal(
+		accountPattern.test(before.text),
+		false,
+		`child must not inherit ${account} full control:\n--- child ---\n${before.text}\n--- parent ---\n${parentAcl.text}`,
+	);
 	// ... but it did inherit a Low no-write-up label. `(NW)` and the `OI`/`CI` tokens are the ACE
 	// rights letters icacls prints verbatim in every locale, so this line identifies a mandatory label
 	// ACE that propagates - not a capability SID and not a localized label name.
