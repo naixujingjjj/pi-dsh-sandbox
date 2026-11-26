@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,10 @@ import { registerSandboxRequestTool } from "../../src/tools/sandbox-request.ts";
 import { getSessionState, invalidateRuntime, invalidateSessions } from "../../src/state.ts";
 
 const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const base = mkdtempSync(join(tmpdir(), "pidsbx-request-"));
+// `src/policy.ts` canonicalizes every root with `realpathSync.native`, and on GitHub's Windows
+// runners TEMP is the 8.3 short form (`C:\Users\RUNNER~1\...`). Resolve the temp directory the same
+// way, or the canonical root and the test's literal path differ only by the short/long spelling.
+const base = realpathSync.native(mkdtempSync(join(tmpdir(), "pidsbx-request-")));
 const agentDir = join(base, "agent");
 const workspace = join(base, "ws");
 const outside = join(base, "out");

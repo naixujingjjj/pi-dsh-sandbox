@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import extension from "../../src/index.ts";
@@ -36,7 +36,10 @@ test("a late initialization failure still blocks the already-registered sandbox_
 });
 
 test("one-time exec uses the four-option approval, hands the human text to the agent and never changes the session mode", async () => {
-	const cwd = mkdtempSync(join(tmpdir(), "pidsbx-approval-"));
+	// `src/policy.ts` canonicalizes the root with `realpathSync.native`, and on GitHub's Windows
+	// runners TEMP is the 8.3 short form (`C:\Users\RUNNER~1\...`). Resolve the temp directory the
+	// same way so the title and the canonical root are compared as one string.
+	const cwd = realpathSync.native(mkdtempSync(join(tmpdir(), "pidsbx-approval-")));
 	let handler;
 	const executions = [];
 	const audit = [];
