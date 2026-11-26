@@ -125,6 +125,47 @@ export function confinedPowerShellOperations(state: SessionState, tail: OutputTa
 	};
 }
 
+/**
+ * Withholds the start of the shell's output until it is clear the shell really started. A cygwin
+ * bash inside the restricted token dies before it runs anything, so its crash text must not reach
+ * the model or the human as command output: {@link finish} then throws the documented
+ * unavailable-bash error instead. After the first kilobyte (or a clean first chunk) the stream is
+ * forwarded unchanged, so interactive output is not buffered.
+ */
+function createBashStartupGuard(tail: OutputTail, onData: (chunk: Buffer) => void, shell: string) {
+	const held: Buffer[] = [];
+	let heldBytes = 0;
+	let released = false;
+	let crashed = false;
+	const forward = (chunk: Buffer) => {
+		appendOutputTail(tail, chunk);
+		onData(chunk);
+	};
+	const flush = () => {
+		released = true;
+		for (const part of held) forward(part);
+		held.length = 0;
+	};
+	return {
+		push(chunk: Buffer) {
+			if (crashed) return;
+			if (released) return forward(chunk);
+			held.push(chunk);
+			heldBytes += chunk.length;
+			if (isCygwinStartupFailure(Buffer.concat(held).toString("utf8"))) {
+				crashed = true;
+				held.length = 0;
+				return;
+			}
+			if (heldBytes >= 1024) flush();
+		},
+		finish() {
+			if (crashed) throw bashStartupFailure(shell);
+			if (!released) flush();
+		},
+	};
+}
+
 /** Bash operations for a non-WSL bash (Git Bash / MSYS2 / Cygwin). */
 export function confinedBashOperations(
 	state: SessionState,
@@ -135,16 +176,15 @@ export function confinedBashOperations(
 		async exec(command, _cwd, options): Promise<{ exitCode: number | null }> {
 			assertReady(state);
 			const invocation = confinedInvocation(state, [shell.shell, ...shell.args, command]);
+			const stream = createBashStartupGuard(tail, options.onData, shell.shell);
 			const result = await runRunner(invocation, {
 				cwd: state.root,
 				env: options.env,
 				signal: options.signal,
 				timeoutSeconds: options.timeout,
-				onData: (chunk) => {
-					appendOutputTail(tail, chunk);
-					options.onData(chunk);
-				},
+				onData: stream.push,
 			});
+			stream.finish();
 			return { exitCode: result.exitCode };
 		},
 	};
@@ -289,9 +329,6 @@ export function registerBashTool(pi: ExtensionAPI, pluginRoot: string): void {
 				commandPrefix,
 			});
 			const result = await definition.execute(id, params, signal, onUpdate, ctx);
-			if (result.isError && isCygwinStartupFailure(outputTailText(tail))) {
-				throw bashStartupFailure(bash.shell);
-			}
 			const annotated = annotateShellResult(result, state, tail);
 			notifyReadiness(state, ctx, annotated, tail);
 			return annotated;
@@ -324,18 +361,16 @@ export function registerUserBash(pi: ExtensionAPI, pluginRoot: string): void {
 					env?: NodeJS.ProcessEnv;
 				}) {
 					const invocation = confinedInvocation(state, [bash.shell, ...bash.args, command]);
+					const stream = createBashStartupGuard(tail, options.onData, bash.shell);
 					const result = await runRunner(invocation, {
 						// Always the canonical authorized root: a `!` command cannot relocate the grant.
 						cwd: state.root,
 						env: options.env,
 						signal: options.signal,
 						timeoutSeconds: options.timeout,
-						onData: (chunk) => {
-							appendOutputTail(tail, chunk);
-							options.onData(chunk);
-						},
+						onData: stream.push,
 					});
-					if (isCygwinStartupFailure(outputTailText(tail))) throw bashStartupFailure(bash.shell);
+					stream.finish();
 					return { exitCode: result.exitCode };
 				},
 			},

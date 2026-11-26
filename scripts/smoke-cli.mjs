@@ -163,7 +163,10 @@ try {
 		confined = true;
 		ok("a `!` command ran (confined path)", `exitCode=${bash.data?.exitCode}`);
 	} else {
-		assert.match(output, /WSL|找不到可用的 bash|SANDBOX/, output);
+		// A refused `!` command surfaces as the WSL notice, the documented unavailable-bash error, or
+		// (on a runner whose cygwin bash dies at startup) that startup crash. What matters is that the
+		// command was refused instead of running unconfined.
+		assert.match(output, /WSL|找不到可用的 bash|SANDBOX|signal pipe/i, output);
 		ok("a `!` command was refused instead of running unconfined (WSL launcher)", String(bash.error ?? "").split("\n")[0]);
 	}
 
