@@ -240,41 +240,48 @@ try {
 		mkdirSync(child, { recursive: true });
 
 		const before = icacls(child).text;
-		assert.equal(accountPattern.test(before), false, `the child must not inherit ${account}:\n${before}`);
-		assert.match(before, /\(OI\)\(CI\)\(NW\)/i, `the child must inherit a Low no-write-up label:\n${before}`);
+		// Some hosts (GitHub's Windows runner: its %TEMP% carries an explicit CREATOR OWNER ACE that
+		// /inheritance:r does not remove) instantiate that ACE for the creating account, so the child
+		// gets an account ACE even though the parent was stripped clean. The layout under test cannot
+		// be built there: report it as skipped with the ACL as evidence instead of a false failure.
+		if (accountPattern.test(before)) {
+			console.log(`SKIP  the inherited-Low-label layout cannot be built on this host:\n${before}`);
+		} else {
+			assert.match(before, /\(OI\)\(CI\)\(NW\)/i, `the child must inherit a Low no-write-up label:\n${before}`);
 
-		const grant = spawnSync(
-			process.execPath,
-			[runner, "--workspace", child, "--temp", childTemp, "--mode", "workspace-write", "--", process.execPath, "-e", "process.stdout.write('granted')"],
-			{ encoding: "utf8", cwd: child },
-		);
-		assert.equal(grant.status, 0, grant.stderr);
-		assert.equal(grant.stdout, "granted");
+			const grant = spawnSync(
+				process.execPath,
+				[runner, "--workspace", child, "--temp", childTemp, "--mode", "workspace-write", "--", process.execPath, "-e", "process.stdout.write('granted')"],
+				{ encoding: "utf8", cwd: child },
+			);
+			assert.equal(grant.status, 0, grant.stderr);
+			assert.equal(grant.stdout, "granted");
 
-		const after = icacls(child).text;
-		assert.match(after, /S-1-4-\d+-\d+/, "the grant must add the workspace capability ACE");
-		assert.match(after, /\(OI\)\(CI\)\(NW\)/i, "the inherited Low label must stay unchanged");
-		assert.equal(accountPattern.test(after), false, `the grant must not need an account ACE:\n${after}`);
+			const after = icacls(child).text;
+			assert.match(after, /S-1-4-\d+-\d+/, "the grant must add the workspace capability ACE");
+			assert.match(after, /\(OI\)\(CI\)\(NW\)/i, "the inherited Low label must stay unchanged");
+			assert.equal(accountPattern.test(after), false, `the grant must not need an account ACE:\n${after}`);
 
-		const inside = join(child, "inside.txt");
-		const insideRun = spawnSync(
-			process.execPath,
-			[runner, "--workspace", child, "--temp", childTemp, "--mode", "workspace-write", "--", process.execPath, "-e",
-				`require('node:fs').writeFileSync(${JSON.stringify(inside)}, 'ok')`],
-			{ encoding: "utf8", cwd: child },
-		);
-		assert.equal(insideRun.status, 0, insideRun.stderr);
-		assert.equal(readFileSync(inside, "utf8"), "ok");
-		const deniedTarget = join(work, "acl-outside.txt");
-		const outsideRun = spawnSync(
-			process.execPath,
-			[runner, "--workspace", child, "--temp", childTemp, "--mode", "workspace-write", "--", process.execPath, "-e",
-				`require('node:fs').writeFileSync(${JSON.stringify(deniedTarget)}, 'nope')`],
-			{ encoding: "utf8", cwd: child },
-		);
-		assert.notEqual(outsideRun.status, 0);
-		assert.equal(existsSync(deniedTarget), false);
-		ok("the INSTALLED patched runner authorizes an inherited-Low-label root with a DACL-only edit and keeps the boundary");
+			const inside = join(child, "inside.txt");
+			const insideRun = spawnSync(
+				process.execPath,
+				[runner, "--workspace", child, "--temp", childTemp, "--mode", "workspace-write", "--", process.execPath, "-e",
+					`require('node:fs').writeFileSync(${JSON.stringify(inside)}, 'ok')`],
+				{ encoding: "utf8", cwd: child },
+			);
+			assert.equal(insideRun.status, 0, insideRun.stderr);
+			assert.equal(readFileSync(inside, "utf8"), "ok");
+			const deniedTarget = join(work, "acl-outside.txt");
+			const outsideRun = spawnSync(
+				process.execPath,
+				[runner, "--workspace", child, "--temp", childTemp, "--mode", "workspace-write", "--", process.execPath, "-e",
+					`require('node:fs').writeFileSync(${JSON.stringify(deniedTarget)}, 'nope')`],
+				{ encoding: "utf8", cwd: child },
+			);
+			assert.notEqual(outsideRun.status, 0);
+			assert.equal(existsSync(deniedTarget), false);
+			ok("the INSTALLED patched runner authorizes an inherited-Low-label root with a DACL-only edit and keeps the boundary");
+		}
 	} finally {
 		// Drop the temporary deny before the tree is removed, so cleanup cannot be blocked.
 		if (denyAdded) {
