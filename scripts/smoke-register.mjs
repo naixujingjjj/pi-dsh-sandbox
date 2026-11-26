@@ -123,8 +123,13 @@ try {
 
 	const tool = session.getToolDefinition("sandbox_request");
 	assert.ok(tool, "sandbox_request definition");
-	assert.match(tool.description, /审批只对本次命令/);
-	assert.match(tool.promptSnippet ?? "", /四项审批/);
+	assert.match(tool.description, /The approval covers only this command/);
+	assert.match(tool.promptSnippet ?? "", /Request one unrestricted one-shot execution/);
+	assert.equal(
+		/\p{Script=Han}/u.test(`${tool.description}\n${tool.promptSnippet}`),
+		false,
+		"model-facing tool metadata stays English",
+	);
 	assert.deepEqual(Object.keys(tool.parameters.properties ?? {}).sort(), ["command", "reason", "timeout"]);
 	assert.equal(tool.parameters.properties.command.minLength, 1);
 	assert.equal(tool.parameters.properties.reason.minLength, 1);
@@ -199,10 +204,10 @@ try {
 
 	const guidelines = (tool.promptGuidelines ?? []).join("\n");
 	assert.match(guidelines, /No, and reason…/);
-	assert.match(guidelines, /新用户指示/);
+	assert.match(guidelines, /is a new user instruction for the current task/);
 	assert.match(guidelines, /Yes, and reason…/);
-	assert.match(guidelines, /先如实报告执行事实/);
-	assert.doesNotMatch(guidelines, /审批意见只是人类的反馈|仅反馈/);
+	assert.match(guidelines, /first report the facts truthfully/);
+	assert.equal(/\p{Script=Han}/u.test(guidelines), false, "prompt guidelines stay English");
 	ok("the SDK exposes prompt guidelines for both reason options");
 
 	const audit = session.sessionManager

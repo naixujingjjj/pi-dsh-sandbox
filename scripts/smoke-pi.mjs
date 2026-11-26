@@ -191,10 +191,10 @@ try {
 	assert.ok(sandboxRequest, "sandbox_request definition");
 	const guidelines = (sandboxRequest.promptGuidelines ?? []).join("\n");
 	assert.match(guidelines, /No, and reason…/);
-	assert.match(guidelines, /新用户指示/);
+	assert.match(guidelines, /is a new user instruction for the current task/);
 	assert.match(guidelines, /Yes, and reason…/);
-	assert.match(guidelines, /先如实报告执行事实/);
-	assert.doesNotMatch(guidelines, /仅反馈/);
+	assert.match(guidelines, /first report the facts truthfully/);
+	assert.equal(/\p{Script=Han}/u.test(guidelines), false, "prompt guidelines stay English");
 	ok("the SDK exposes prompt guidelines for the reason semantics");
 
 	const approval = (command, selected, reason) => ({
