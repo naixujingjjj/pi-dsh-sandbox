@@ -79,6 +79,24 @@ function shellMissing(what: string, error: unknown): SandboxError {
 	);
 }
 
+/**
+ * A MSYS2/Cygwin bash (Git for Windows) cannot open its signal pipe inside the restricted token:
+ * it dies before running anything (`couldn't create signal pipe, Win32 error 5`). That is an
+ * unusable bash, not a failing command, so it must fail closed with the documented text instead of
+ * handing the raw cygwin startup crash to the model as command output.
+ */
+export function isCygwinStartupFailure(output: string): boolean {
+	return /couldn't create signal pipe/i.test(output);
+}
+
+export function bashStartupFailure(shell: string): SandboxError {
+	return new SandboxError(
+		"SANDBOX_UNAVAILABLE",
+		`找不到可用的 bash：${shell} 在受限令牌下无法启动（cygwin 无法创建信号管道）。` +
+			"沙盒不会以未受限方式执行命令；请改用 powershell 工具，或在 ~/.pi/agent/settings.json 把 shellPath 指向可用的 bash。",
+	);
+}
+
 /** Shell operations that spawn the runner instead of the shell directly. */
 export function confinedPowerShellOperations(state: SessionState, tail: OutputTail): PowerShellOperations {
 	return {
@@ -271,6 +289,9 @@ export function registerBashTool(pi: ExtensionAPI, pluginRoot: string): void {
 				commandPrefix,
 			});
 			const result = await definition.execute(id, params, signal, onUpdate, ctx);
+			if (result.isError && isCygwinStartupFailure(outputTailText(tail))) {
+				throw bashStartupFailure(bash.shell);
+			}
 			const annotated = annotateShellResult(result, state, tail);
 			notifyReadiness(state, ctx, annotated, tail);
 			return annotated;
@@ -314,6 +335,7 @@ export function registerUserBash(pi: ExtensionAPI, pluginRoot: string): void {
 							options.onData(chunk);
 						},
 					});
+					if (isCygwinStartupFailure(outputTailText(tail))) throw bashStartupFailure(bash.shell);
 					return { exitCode: result.exitCode };
 				},
 			},
