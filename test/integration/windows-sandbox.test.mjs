@@ -411,10 +411,6 @@ test("a workspace root that only inherits the Low label is granted without an AC
 	// instead of reporting a failure the plugin has no say in.
 	const parentAcl = icacls(parent);
 	assert.equal(parentAcl.status, 0, parentAcl.text);
-	if (/\(I\)/.test(parentAcl.text) && accountPattern.test(parentAcl.text)) {
-		t.skip(`this host's %TEMP% keeps an inherited full-control ACE after /inheritance:r:\n${parentAcl.text}`);
-		return;
-	}
 	// The temporary deny must be removed even when an assertion below throws, or the throw-away
 	// tree cannot be deleted by the file-level `after` hook.
 	try {
@@ -422,12 +418,16 @@ test("a workspace root that only inherits the Low label is granted without an AC
 
 	const before = icacls(child);
 	assert.equal(before.status, 0, before.text);
-	// The precondition under test: the child did NOT inherit the account's full control.
-	assert.equal(
-		accountPattern.test(before.text),
-		false,
-		`child must not inherit ${account} full control:\n--- child ---\n${before.text}\n--- parent ---\n${parentAcl.text}`,
-	);
+	// The precondition under test: the child did NOT inherit the account's full control. A host whose
+	// %TEMP% carries an explicit CREATOR OWNER ACE (GitHub's Windows runner does) instantiates it as
+	// the creating account, so the child gets full control even though the parent was stripped. The
+	// precondition cannot be built there, so skip with both ACLs as evidence instead of failing.
+	if (accountPattern.test(before.text)) {
+		t.skip(
+			`this host grants ${account} full control to a new child of the stripped parent:\n--- child ---\n${before.text}\n--- parent ---\n${parentAcl.text}`,
+		);
+		return;
+	}
 	// ... but it did inherit a Low no-write-up label. `(NW)` and the `OI`/`CI` tokens are the ACE
 	// rights letters icacls prints verbatim in every locale, so this line identifies a mandatory label
 	// ACE that propagates - not a capability SID and not a localized label name.
